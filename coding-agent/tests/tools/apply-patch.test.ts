@@ -1,0 +1,193 @@
+import { describe, test, expect } from "bun:test";
+import { StubExecutionEnvironment } from "../stubs/stub-env.js";
+import {
+  parsePatch,
+  applyPatch,
+  createApplyPatchTool,
+} from "../../src/tools/apply-patch.js";
+
+describe("parsePatch", () => {
+  test("throws on missing Begin Patch", () => {
+    expect(() => parsePatch("some random text")).toThrow(
+      "missing '*** Begin Patch'",
+    );
+  });
+
+  test("parses add file operation", () => {
+    const patch = `*** Begin Patch
+*** Add File: src/hello.ts
++export const hello = "world";
+*** End Patch`;
+    const ops = parsePatch(patch);
+    expect(ops.length).toBe(1);
+    expect(ops[0]?.kind).toBe("add");
+    expect(ops[0]?.path).toBe("src/hello.ts");
+    expect(ops[0]?.content).toBe('export const hello = "world";');
+  });
+
+  test("parses delete file operation", () => {
+    const patch = `*** Begin Patch
+*** Delete File: old/file.ts
+*** End Patch`;
+    const ops = parsePatch(patch);
+    expect(ops.length).toBe(1);
+    expect(ops[0]?.kind).toBe("delete");
+    expect(ops[0]?.path).toBe("old/file.ts");
+  });
+
+  test("parses update file operation with hunks", () => {
+    const patch = `*** Begin Patch
+*** Update File: src/main.ts
+@@ export function main
+ export function main() {
+-  console.log("old");
++  console.log("new");
+ }
+*** End Patch`;
+    const ops = parsePatch(patch);
+    expect(ops.length).toBe(1);
+    expect(ops[0]?.kind).toBe("update");
+    expect(ops[0]?.hunks?.length).toBe(1);
+    expect(ops[0]?.hunks?.[0]?.contextHint).toBe("export function main");
+    expect(ops[0]?.hunks?.[0]?.lines.length).toBe(4);
+  });
+});
+
+describe("applyPatch", () => {
+  test("adds a new file", async () => {
+    const env = new StubExecutionEnvironment();
+    const patch = `*** Begin Patch
+*** Add File: /test/new.ts
++const x = 1;
++const y = 2;
+*** End Patch`;
+    const result = await applyPatch(patch, env);
+    expect(result).toContain("Added /test/new.ts");
+    expect(await env.fileExists("/test/new.ts")).toBe(true);
+  });
+
+  test("deletes a file", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([["/test/old.ts", "content"]]),
+    });
+    const patch = `*** Begin Patch
+*** Delete File: /test/old.ts
+*** End Patch`;
+    const result = await applyPatch(patch, env);
+    expect(result).toContain("Deleted /test/old.ts");
+  });
+
+  test("updates a file with a single hunk", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/test/main.ts", 'function greet() {\n  console.log("hello");\n}'],
+      ]),
+    });
+    const patch = `*** Begin Patch
+*** Update File: /test/main.ts
+@@ function greet
+ function greet() {
+-  console.log("hello");
++  console.log("goodbye");
+ }
+*** End Patch`;
+    const result = await applyPatch(patch, env);
+    expect(result).toContain("Updated /test/main.ts");
+
+    const content = await env.readFile("/test/main.ts");
+    expect(content).toContain("goodbye");
+    expect(content).not.toContain("hello");
+  });
+
+  test("updates a file with multiple hunks", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        [
+          "/test/multi.ts",
+          "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;",
+        ],
+      ]),
+    });
+    const patch = `*** Begin Patch
+*** Update File: /test/multi.ts
+@@ const a
+-const a = 1;
++const a = 10;
+ const b = 2;
+@@ const d
+ const d = 4;
+-const e = 5;
++const e = 50;
+*** End Patch`;
+    const result = await applyPatch(patch, env);
+    expect(result).toContain("Updated /test/multi.ts");
+
+    const content = await env.readFile("/test/multi.ts");
+    expect(content).toContain("a = 10");
+    expect(content).toContain("e = 50");
+    expect(content).toContain("b = 2");
+  });
+
+  test("updates and moves (renames) a file", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/test/old-name.ts", "const x = 1;\nconst y = 2;"],
+      ]),
+    });
+    const patch = `*** Begin Patch
+*** Update File: /test/old-name.ts
+*** Move to: /test/new-name.ts
+@@ const x
+-const x = 1;
++const x = 100;
+ const y = 2;
+*** End Patch`;
+    const result = await applyPatch(patch, env);
+    expect(result).toContain("Updated and moved /test/old-name.ts -> /test/new-name.ts");
+    expect(await env.fileExists("/test/new-name.ts")).toBe(true);
+  });
+
+  test("applies full patch with add, update, and delete", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/test/existing.ts", "const old = true;"],
+        ["/test/remove-me.ts", "gone"],
+      ]),
+    });
+    const patch = `*** Begin Patch
+*** Add File: /test/brand-new.ts
++export const fresh = true;
+*** Update File: /test/existing.ts
+@@ const old
+-const old = true;
++const old = false;
+*** Delete File: /test/remove-me.ts
+*** End Patch`;
+    const result = await applyPatch(patch, env);
+    expect(result).toContain("Added /test/brand-new.ts");
+    expect(result).toContain("Updated /test/existing.ts");
+    expect(result).toContain("Deleted /test/remove-me.ts");
+
+    expect(await env.fileExists("/test/brand-new.ts")).toBe(true);
+    const content = await env.readFile("/test/existing.ts");
+    expect(content).toContain("old = false");
+  });
+});
+
+describe("createApplyPatchTool", () => {
+  test("tool definition has correct name", () => {
+    const tool = createApplyPatchTool();
+    expect(tool.definition.name).toBe("apply_patch");
+  });
+
+  test("executor applies a patch", async () => {
+    const env = new StubExecutionEnvironment();
+    const tool = createApplyPatchTool();
+    const patch = `*** Begin Patch
+*** Add File: /test/via-tool.ts
++hello
+*** End Patch`;
+    const result = await tool.executor({ patch }, env);
+    expect(result).toContain("Added /test/via-tool.ts");
+  });
+});

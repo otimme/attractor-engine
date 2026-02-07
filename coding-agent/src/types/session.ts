@@ -1,0 +1,75 @@
+import type { ToolCallData, ToolResult, Usage } from "unified-llm";
+
+export const SessionState = {
+  IDLE: "idle",
+  PROCESSING: "processing",
+  AWAITING_INPUT: "awaiting_input",
+  CLOSED: "closed",
+} as const;
+
+export type SessionState = (typeof SessionState)[keyof typeof SessionState];
+
+export interface SessionConfig {
+  maxTurns: number;
+  maxToolRoundsPerInput: number;
+  defaultCommandTimeoutMs: number;
+  maxCommandTimeoutMs: number;
+  reasoningEffort: "low" | "medium" | "high";
+  toolOutputLimits: { maxChars: number; maxLines: number };
+  enableLoopDetection: boolean;
+  loopDetectionWindow: number;
+  maxSubagentDepth: number;
+}
+
+export const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  maxTurns: 200,
+  maxToolRoundsPerInput: 50,
+  defaultCommandTimeoutMs: 120_000,
+  maxCommandTimeoutMs: 600_000,
+  reasoningEffort: "medium",
+  toolOutputLimits: { maxChars: 30_000, maxLines: 500 },
+  enableLoopDetection: true,
+  loopDetectionWindow: 5,
+  maxSubagentDepth: 3,
+};
+
+export interface UserTurn {
+  kind: "user";
+  content: string;
+  timestamp: Date;
+}
+
+export interface AssistantTurn {
+  kind: "assistant";
+  content: string;
+  toolCalls: ToolCallData[];
+  reasoning: string | null;
+  usage: Usage;
+  responseId: string | null;
+  timestamp: Date;
+}
+
+export interface ToolResultsTurn {
+  kind: "tool_results";
+  results: ToolResult[];
+  timestamp: Date;
+}
+
+export interface SystemTurn {
+  kind: "system";
+  content: string;
+  timestamp: Date;
+}
+
+export interface SteeringTurn {
+  kind: "steering";
+  content: string;
+  timestamp: Date;
+}
+
+export type Turn =
+  | UserTurn
+  | AssistantTurn
+  | ToolResultsTurn
+  | SystemTurn
+  | SteeringTurn;

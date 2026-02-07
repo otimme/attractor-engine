@@ -1,0 +1,4 @@
+{
+  "private": true,
+  "workspaces": ["unified-llm", "coding-agent"]
+}

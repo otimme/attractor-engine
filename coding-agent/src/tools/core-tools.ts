@@ -1,0 +1,236 @@
+import type { RegisteredTool } from "../types/index.js";
+import type { ExecutionEnvironment } from "../types/index.js";
+
+/**
+ * Strip line-number prefixes produced by env.readFile().
+ * Format is "  N | content" — we strip everything up to and including " | ".
+ */
+function stripLineNumbers(numbered: string): string {
+  return numbered
+    .split("\n")
+    .map((line) => {
+      const pipeIndex = line.indexOf(" | ");
+      return pipeIndex >= 0 ? line.slice(pipeIndex + 3) : line;
+    })
+    .join("\n");
+}
+
+export function createReadFileTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "read_file",
+      description:
+        "Read a file from the filesystem. Returns line-numbered content.",
+      parameters: {
+        type: "object",
+        properties: {
+          file_path: { type: "string", description: "Absolute path to the file to read" },
+          offset: { type: "integer", description: "Line offset to start reading from" },
+          limit: {
+            type: "integer",
+            description: "Maximum number of lines to read",
+            default: 2000,
+          },
+        },
+        required: ["file_path"],
+      },
+    },
+    executor: async (args, env) => {
+      const filePath = args.file_path as string;
+      const offset = args.offset as number | undefined;
+      const limit = args.limit as number | undefined;
+      return env.readFile(filePath, offset, limit);
+    },
+  };
+}
+
+export function createWriteFileTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "write_file",
+      description:
+        "Write content to a file. Creates the file and parent directories if needed.",
+      parameters: {
+        type: "object",
+        properties: {
+          file_path: { type: "string", description: "Absolute path to the file to write" },
+          content: { type: "string", description: "Content to write to the file" },
+        },
+        required: ["file_path", "content"],
+      },
+    },
+    executor: async (args, env) => {
+      const filePath = args.file_path as string;
+      const content = args.content as string;
+      await env.writeFile(filePath, content);
+      return `Wrote ${content.length} bytes to ${filePath}`;
+    },
+  };
+}
+
+export function createEditFileTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "edit_file",
+      description: "Replace an exact string occurrence in a file.",
+      parameters: {
+        type: "object",
+        properties: {
+          file_path: { type: "string", description: "Absolute path to the file to edit" },
+          old_string: { type: "string", description: "The exact string to find and replace" },
+          new_string: { type: "string", description: "The replacement string" },
+          replace_all: {
+            type: "boolean",
+            description: "Replace all occurrences instead of just the first",
+            default: false,
+          },
+        },
+        required: ["file_path", "old_string", "new_string"],
+      },
+    },
+    executor: async (args, env) => {
+      const filePath = args.file_path as string;
+      const oldString = args.old_string as string;
+      const newString = args.new_string as string;
+      const replaceAll = (args.replace_all as boolean | undefined) ?? false;
+
+      const numbered = await env.readFile(filePath);
+      const rawContent = stripLineNumbers(numbered);
+
+      if (!rawContent.includes(oldString)) {
+        throw new Error(`old_string not found in ${filePath}`);
+      }
+
+      const occurrences = rawContent.split(oldString).length - 1;
+
+      if (!replaceAll && occurrences > 1) {
+        throw new Error(
+          `old_string is not unique in ${filePath}. Provide more context or use replace_all.`,
+        );
+      }
+
+      const newContent = replaceAll
+        ? rawContent.replaceAll(oldString, newString)
+        : rawContent.replace(oldString, newString);
+
+      await env.writeFile(filePath, newContent);
+
+      const replaced = replaceAll ? occurrences : 1;
+      return `Replaced ${replaced} occurrence(s) in ${filePath}`;
+    },
+  };
+}
+
+export function createShellTool(config: {
+  defaultTimeoutMs: number;
+  maxTimeoutMs: number;
+}): RegisteredTool {
+  return {
+    definition: {
+      name: "shell",
+      description: "Execute a shell command. Returns stdout, stderr, and exit code.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "The shell command to execute" },
+          timeout_ms: {
+            type: "integer",
+            description: "Timeout in milliseconds",
+          },
+          description: {
+            type: "string",
+            description: "Description of what this command does",
+          },
+        },
+        required: ["command"],
+      },
+    },
+    executor: async (args, env) => {
+      const command = args.command as string;
+      const requestedTimeout = args.timeout_ms as number | undefined;
+      const timeout = Math.min(
+        requestedTimeout ?? config.defaultTimeoutMs,
+        config.maxTimeoutMs,
+      );
+
+      const result = await env.execCommand(command, timeout);
+
+      const parts: string[] = [];
+      if (result.stdout) {
+        parts.push(result.stdout);
+      }
+      if (result.stderr) {
+        parts.push(`[stderr]\n${result.stderr}`);
+      }
+      parts.push(`[exit code: ${result.exitCode}] [duration: ${result.durationMs}ms]`);
+
+      if (result.timedOut) {
+        parts.push(
+          `[ERROR: Command timed out after ${timeout}ms. Partial output is shown above. You can retry with a longer timeout by setting the timeout_ms parameter.]`,
+        );
+      }
+
+      return parts.join("\n");
+    },
+  };
+}
+
+export function createGrepTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "grep",
+      description: "Search file contents using regex patterns.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "Regex pattern to search for" },
+          path: { type: "string", description: "Directory or file to search in" },
+          glob_filter: { type: "string", description: "Glob pattern to filter files" },
+          case_insensitive: { type: "boolean", description: "Case insensitive search" },
+          max_results: {
+            type: "integer",
+            description: "Maximum number of results",
+            default: 100,
+          },
+        },
+        required: ["pattern"],
+      },
+    },
+    executor: async (args, env) => {
+      const pattern = args.pattern as string;
+      const path = (args.path as string | undefined) ?? env.workingDirectory();
+      const globFilter = args.glob_filter as string | undefined;
+      const caseInsensitive = args.case_insensitive as boolean | undefined;
+      const maxResults = args.max_results as number | undefined;
+
+      return env.grep(pattern, path, {
+        caseInsensitive,
+        globFilter,
+        maxResults: maxResults ?? 100,
+      });
+    },
+  };
+}
+
+export function createGlobTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "glob",
+      description: "Find files matching a glob pattern.",
+      parameters: {
+        type: "object",
+        properties: {
+          pattern: { type: "string", description: "Glob pattern to match files" },
+          path: { type: "string", description: "Base directory to search in" },
+        },
+        required: ["pattern"],
+      },
+    },
+    executor: async (args, env) => {
+      const pattern = args.pattern as string;
+      const path = args.path as string | undefined;
+      const files = await env.glob(pattern, path);
+      return files.join("\n");
+    },
+  };
+}
