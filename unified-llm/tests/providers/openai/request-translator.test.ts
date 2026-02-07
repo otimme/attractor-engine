@@ -125,7 +125,12 @@ describe("OpenAI Request Translator", () => {
         type: "function",
         name: "get_weather",
         description: "Get weather info",
-        parameters: { type: "object", properties: { city: { type: "string" } }, additionalProperties: false },
+        parameters: {
+          type: "object",
+          properties: { city: { type: ["string", "null"] } },
+          additionalProperties: false,
+          required: ["city"],
+        },
         strict: true,
       },
     ]);

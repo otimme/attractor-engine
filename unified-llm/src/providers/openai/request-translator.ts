@@ -156,17 +156,50 @@ export function translateRequest(
   }
 
   // Tools — OpenAI strict mode requires additionalProperties: false
+  // and all properties listed in required
   if (request.tools && request.tools.length > 0) {
-    body.tools = request.tools.map((tool) => ({
-      type: "function",
-      name: tool.name,
-      description: tool.description,
-      parameters: {
-        ...tool.parameters,
-        additionalProperties: false,
-      },
-      strict: true,
-    }));
+    body.tools = request.tools.map((tool) => {
+      const params = { ...tool.parameters };
+      params.additionalProperties = false;
+
+      // Strict mode: all properties must be in required.
+      // Optional params get { type: [original, "null"] } to allow null.
+      const props = params.properties;
+      if (typeof props === "object" && props !== null) {
+        const allKeys = Object.keys(props as Record<string, unknown>);
+        const existing = Array.isArray(params.required)
+          ? (params.required as string[])
+          : [];
+        const existingSet = new Set(existing);
+        const missing = allKeys.filter((k) => !existingSet.has(k));
+
+        if (missing.length > 0) {
+          const newProps = { ...(props as Record<string, Record<string, unknown>>) };
+          for (const key of missing) {
+            const prop = newProps[key];
+            if (prop) {
+              const propType = prop.type;
+              newProps[key] = {
+                ...prop,
+                type: Array.isArray(propType)
+                  ? propType
+                  : [propType as string, "null"],
+              };
+            }
+          }
+          params.properties = newProps;
+          params.required = allKeys;
+        }
+      }
+
+      return {
+        type: "function",
+        name: tool.name,
+        description: tool.description,
+        parameters: params,
+        strict: true,
+      };
+    });
   }
 
   // Tool choice

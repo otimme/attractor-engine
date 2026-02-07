@@ -162,7 +162,9 @@ export class Session {
         messages,
         tools: this.providerProfile.tools(),
         toolChoice: { mode: "auto" },
-        reasoningEffort: this.config.reasoningEffort,
+        ...(this.config.reasoningEffort
+          ? { reasoningEffort: this.config.reasoningEffort }
+          : {}),
         provider: this.providerProfile.id,
         ...(providerOptions ? { providerOptions } : {}),
       };

@@ -14,7 +14,7 @@ export interface SessionConfig {
   maxToolRoundsPerInput: number;
   defaultCommandTimeoutMs: number;
   maxCommandTimeoutMs: number;
-  reasoningEffort: "low" | "medium" | "high";
+  reasoningEffort: "low" | "medium" | "high" | null;
   toolOutputLimits: { maxChars: number; maxLines: number };
   enableLoopDetection: boolean;
   loopDetectionWindow: number;
@@ -26,7 +26,7 @@ export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   maxToolRoundsPerInput: 50,
   defaultCommandTimeoutMs: 120_000,
   maxCommandTimeoutMs: 600_000,
-  reasoningEffort: "medium",
+  reasoningEffort: null,
   toolOutputLimits: { maxChars: 30_000, maxLines: 500 },
   enableLoopDetection: true,
   loopDetectionWindow: 5,
