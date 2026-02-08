@@ -19,13 +19,17 @@ export function buildRetryPolicy(node: Node, graph: Graph): RetryPolicy {
     throw new Error("standard retry policy not found");
   }
 
-  // Resolve max retries: node max_retries -> graph default_max_retry -> 0
-  const nodeMaxRetries = node.attributes.has("max_retries")
-    ? getIntegerAttr(node.attributes, "max_retries", 0)
-    : undefined;
-  const graphDefault = getIntegerAttr(graph.attributes, "default_max_retry", 0);
-  const maxRetries = nodeMaxRetries !== undefined ? nodeMaxRetries : graphDefault;
-  const maxAttempts = maxRetries + 1;
+  // Resolve max retries: node max_retries -> graph default_max_retry -> preset maxAttempts
+  const nodeHasMaxRetries = node.attributes.has("max_retries");
+  const graphHasDefault = graph.attributes.has("default_max_retry");
+  let maxAttempts: number;
+  if (nodeHasMaxRetries) {
+    maxAttempts = getIntegerAttr(node.attributes, "max_retries", 0) + 1;
+  } else if (graphHasDefault) {
+    maxAttempts = getIntegerAttr(graph.attributes, "default_max_retry", 50) + 1;
+  } else {
+    maxAttempts = base.maxAttempts;
+  }
 
   return {
     maxAttempts,

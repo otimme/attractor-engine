@@ -59,10 +59,17 @@ export function selectEdge(
     return bestByWeightThenLexical(conditionMatched);
   }
 
-  // Step 2: Preferred label match
+  // Build eligible edges: unconditional + condition-passing
+  const eligible = edges.filter((e) => {
+    const condition = getStringAttr(e.attributes, "condition");
+    if (condition === "") return true;
+    return evaluateCondition(condition, outcome, context);
+  });
+
+  // Step 2: Preferred label match (among eligible edges only)
   if (outcome.preferredLabel !== "") {
     const normalizedPreferred = normalizeLabel(outcome.preferredLabel);
-    for (const edge of edges) {
+    for (const edge of eligible) {
       const edgeLabel = getStringAttr(edge.attributes, "label");
       if (edgeLabel !== "" && normalizeLabel(edgeLabel) === normalizedPreferred) {
         return edge;

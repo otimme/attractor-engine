@@ -117,6 +117,27 @@ describe("selectEdge", () => {
     expect(result?.to).toBe("B");
   });
 
+  test("step 2: preferred label does NOT match edge with failing condition", () => {
+    const nodeA = makeNode("A");
+    const condFail = makeEdge("A", "B", {
+      label: stringAttr("Yes"),
+      condition: stringAttr("outcome=fail"),
+    });
+    const unconditional = makeEdge("A", "C");
+    const graph = makeGraph(
+      [nodeA, makeNode("B"), makeNode("C")],
+      [condFail, unconditional],
+    );
+
+    const outcome = createOutcome({
+      status: StageStatus.SUCCESS,
+      preferredLabel: "yes",
+    });
+    const result = selectEdge(nodeA, outcome, new Context(), graph);
+    // Should NOT pick B (label matches but condition fails), should fall through
+    expect(result?.to).toBe("C");
+  });
+
   test("step 2: preferred label with accelerator prefix", () => {
     const nodeA = makeNode("A");
     const e1 = makeEdge("A", "B", { label: stringAttr("[Y] Yes") });

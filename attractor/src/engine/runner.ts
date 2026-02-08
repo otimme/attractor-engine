@@ -96,6 +96,7 @@ export interface PipelineRunnerConfig {
   eventEmitter?: EventEmitter;
   onEvent?: (event: PipelineEvent) => void;
   logsRoot?: string;
+  cleanup?: () => Promise<void>;
 }
 
 export interface PipelineResult {
@@ -139,6 +140,7 @@ interface LoopState {
   lastOutcome: Outcome;
   restartCount: number;
   degradeNextFidelity: boolean;
+  logsRoot: string;
 }
 
 export class PipelineRunner {
@@ -175,6 +177,9 @@ export class PipelineRunner {
     const context = new Context();
     mirrorGraphAttributes(graph, context);
 
+    // Create run directory with unique run ID
+    const logsRoot = join(this.config.logsRoot ?? "/tmp/attractor-logs", this.pipelineId);
+
     const state: LoopState = {
       context,
       completedNodes: [],
@@ -184,12 +189,10 @@ export class PipelineRunner {
       lastOutcome: createOutcome({ status: StageStatus.SUCCESS }),
       restartCount: 0,
       degradeNextFidelity: false,
+      logsRoot,
     };
 
     this.emitEvent(EventKind.PIPELINE_STARTED, { graphName: graph.name });
-
-    // Create run directory and manifest
-    const logsRoot = this.config.logsRoot ?? "/tmp/attractor-logs";
     try {
       await mkdir(logsRoot, { recursive: true });
       const manifest = {
@@ -263,6 +266,8 @@ export class PipelineRunner {
       }
     }
 
+    const logsRoot = join(this.config.logsRoot ?? "/tmp/attractor-logs", this.pipelineId);
+
     const state: LoopState = {
       context,
       completedNodes,
@@ -272,6 +277,7 @@ export class PipelineRunner {
       lastOutcome,
       restartCount: 0,
       degradeNextFidelity: true,
+      logsRoot,
     };
 
     this.emitEvent(EventKind.PIPELINE_STARTED, { graphName: graph.name });
@@ -283,7 +289,8 @@ export class PipelineRunner {
     let { context } = state;
     const { completedNodes, nodeOutcomes, nodeRetries } = state;
     let { currentNode, lastOutcome, restartCount, degradeNextFidelity } = state;
-    const logsRoot = this.config.logsRoot ?? "/tmp/attractor-logs";
+    const baseLogsRoot = state.logsRoot;
+    let logsRoot = baseLogsRoot;
 
     while (true) {
       // Step 1: Check for terminal node
@@ -463,6 +470,13 @@ export class PipelineRunner {
         context = new Context();
         mirrorGraphAttributes(graph, context);
 
+        // Clear per-node state from previous iteration
+        nodeOutcomes.clear();
+        nodeRetries.clear();
+
+        // Fresh logs subdirectory for this restart
+        logsRoot = join(baseLogsRoot, "restart-" + String(restartCount));
+
         // Separator marker in completedNodes
         completedNodes.push(`--- restart ${restartCount} ---`);
 
@@ -483,7 +497,7 @@ export class PipelineRunner {
         this.emitEvent(EventKind.PIPELINE_RESTARTED, {
           restartCount,
           targetNode: nextEdge.to,
-          logsRoot: join(logsRoot, "restart-" + String(restartCount)),
+          logsRoot,
         });
 
         continue;
@@ -530,6 +544,15 @@ export class PipelineRunner {
       contextValues: context.snapshot(),
       logs: [...context.logs()],
     });
+
+    // Resource cleanup (close sessions, release files)
+    if (this.config.cleanup) {
+      try {
+        await this.config.cleanup();
+      } catch {
+        // cleanup failure is non-fatal
+      }
+    }
 
     this.emitEvent(EventKind.PIPELINE_COMPLETED, {
       completedNodes,

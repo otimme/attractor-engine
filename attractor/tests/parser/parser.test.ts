@@ -201,6 +201,26 @@ describe("parser", () => {
     expect(node?.attributes.get("threshold")).toEqual({ kind: "float", value: 0.5 });
   });
 
+  test("parses leading-dot float values", () => {
+    const graph = parse(`
+      digraph G {
+        node_a [threshold=.5]
+      }
+    `);
+    const node = graph.nodes.get("node_a");
+    expect(node?.attributes.get("threshold")).toEqual({ kind: "float", value: 0.5 });
+  });
+
+  test("parses negative leading-dot float values", () => {
+    const graph = parse(`
+      digraph G {
+        node_a [threshold=-.5]
+      }
+    `);
+    const node = graph.nodes.get("node_a");
+    expect(node?.attributes.get("threshold")).toEqual({ kind: "float", value: -0.5 });
+  });
+
   test("parses duration values in strings", () => {
     const graph = parse(`
       digraph G {
@@ -269,16 +289,16 @@ describe("parser", () => {
     expect(graph.nodes.has("C")).toBe(true);
   });
 
-  test("rejects undirected graph keyword", () => {
-    expect(() => parse("graph G {}")).toThrow(ParseError);
+  test("rejects undirected graph keyword with Unsupported message", () => {
+    expect(() => parse("graph G {}")).toThrow("Unsupported");
   });
 
   test("rejects undirected edge operator", () => {
     expect(() => parse("digraph G { A -- B }")).toThrow(LexerError);
   });
 
-  test("rejects strict modifier", () => {
-    expect(() => parse("strict digraph G {}")).toThrow(ParseError);
+  test("rejects strict modifier with Unsupported message", () => {
+    expect(() => parse("strict digraph G {}")).toThrow("Unsupported");
   });
 
   test("rejects missing digraph keyword", () => {

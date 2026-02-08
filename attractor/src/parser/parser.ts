@@ -69,7 +69,7 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
 
   // Reject unsupported keywords at the top level
   const first = current();
-  if (first.kind === TokenKind.IDENTIFIER && (first.value === "graph" || first.value === "strict")) {
+  if (first.kind === TokenKind.GRAPH || (first.kind === TokenKind.IDENTIFIER && first.value === "strict")) {
     throw new ParseError(
       `Unsupported: "${first.value}". Only "digraph" is supported`,
       first.line,

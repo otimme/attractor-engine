@@ -10,7 +10,7 @@ import type { Handler } from "../../src/types/handler.js";
 import type { Graph, Node, Edge, AttributeValue } from "../../src/types/graph.js";
 import { stringAttr, booleanAttr, integerAttr } from "../../src/types/graph.js";
 import { join } from "path";
-import { mkdtemp, rm, readFile } from "fs/promises";
+import { mkdtemp, rm, readFile, readdir } from "fs/promises";
 import { tmpdir } from "os";
 
 let tempDirs: string[] = [];
@@ -26,6 +26,14 @@ afterEach(async () => {
   tempDirs = [];
   await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })));
 });
+
+/** Find the unique run subdirectory (pipelineId) created under logsRoot. */
+async function findRunDir(logsRoot: string): Promise<string> {
+  const entries = await readdir(logsRoot, { withFileTypes: true });
+  const subdir = entries.find((e) => e.isDirectory());
+  if (!subdir) return logsRoot;
+  return join(logsRoot, subdir.name);
+}
 
 function makeNode(
   id: string,
@@ -304,8 +312,9 @@ describe("nodeRetries populated in checkpoint", () => {
 
     await runner.run(graph);
 
-    // Read the last checkpoint saved
-    const raw = await readFile(join(dir, "checkpoint.json"), "utf-8");
+    // Read the last checkpoint saved (under run-specific subdirectory)
+    const runDir = await findRunDir(dir);
+    const raw = await readFile(join(runDir, "checkpoint.json"), "utf-8");
     const checkpoint: Checkpoint = JSON.parse(raw) as Checkpoint;
 
     // Both start and work should have 1 attempt each (no retries)

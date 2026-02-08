@@ -133,15 +133,25 @@ export function tokenize(input: string): Token[] {
       value += advance();
     }
 
-    while (pos < input.length && peek() >= "0" && peek() <= "9") {
-      value += advance();
-    }
-
-    if (peek() === "." && peekAt(1) >= "0" && peekAt(1) <= "9") {
+    // Handle leading-dot floats like .5 or -.5
+    if (peek() === ".") {
       hasDecimal = true;
+      value += "0"; // normalize: .5 -> 0.5
       value += advance(); // the dot
       while (pos < input.length && peek() >= "0" && peek() <= "9") {
         value += advance();
+      }
+    } else {
+      while (pos < input.length && peek() >= "0" && peek() <= "9") {
+        value += advance();
+      }
+
+      if (peek() === "." && peekAt(1) >= "0" && peekAt(1) <= "9") {
+        hasDecimal = true;
+        value += advance(); // the dot
+        while (pos < input.length && peek() >= "0" && peek() <= "9") {
+          value += advance();
+        }
       }
     }
 
@@ -237,7 +247,7 @@ export function tokenize(input: string): Token[] {
       tokens.push(readNumberOrDuration());
       continue;
     }
-    if (ch === "-" && peekAt(1) >= "0" && peekAt(1) <= "9") {
+    if (ch === "-" && ((peekAt(1) >= "0" && peekAt(1) <= "9") || peekAt(1) === ".")) {
       // Check it's not the arrow operator
       if (peekAt(1) !== ">") {
         tokens.push(readNumberOrDuration());
@@ -299,6 +309,10 @@ export function tokenize(input: string): Token[] {
       continue;
     }
     if (ch === ".") {
+      if (peekAt(1) >= "0" && peekAt(1) <= "9") {
+        tokens.push(readNumberOrDuration());
+        continue;
+      }
       advance();
       tokens.push({ kind: TokenKind.DOT, value: ".", line: startLine, column: startCol });
       continue;

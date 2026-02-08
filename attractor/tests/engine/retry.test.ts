@@ -63,11 +63,27 @@ describe("buildRetryPolicy", () => {
     expect(policy.maxAttempts).toBe(3); // 2 + 1
   });
 
-  test("defaults to 1 attempt when nothing set", () => {
+  test("defaults to preset maxAttempts when nothing set", () => {
     const node = makeNode("n");
     const graph = makeGraph();
     const policy = buildRetryPolicy(node, graph);
-    expect(policy.maxAttempts).toBe(1);
+    // standard preset has maxAttempts=5
+    expect(policy.maxAttempts).toBe(5);
+  });
+
+  test("uses preset maxAttempts for named preset when no max_retries or graph default", () => {
+    const node = makeNode("n", { retry_policy: stringAttr("patient") });
+    const graph = makeGraph();
+    const policy = buildRetryPolicy(node, graph);
+    // patient preset has maxAttempts=3
+    expect(policy.maxAttempts).toBe(3);
+  });
+
+  test("graph default_max_retry overrides preset maxAttempts", () => {
+    const node = makeNode("n", { retry_policy: stringAttr("patient") });
+    const graph = makeGraph({ default_max_retry: integerAttr(10) });
+    const policy = buildRetryPolicy(node, graph);
+    expect(policy.maxAttempts).toBe(11); // 10 + 1
   });
 
   test("uses named retry_policy preset from node attribute", () => {
@@ -104,6 +120,36 @@ describe("buildRetryPolicy", () => {
     // Falls back to standard: initialDelayMs=200, backoffFactor=2.0
     expect(policy.backoff.initialDelayMs).toBe(200);
     expect(policy.backoff.backoffFactor).toBe(2.0);
+  });
+});
+
+describe("defaultShouldRetry via buildRetryPolicy", () => {
+  test("returns false for validation errors", () => {
+    const node = makeNode("n", { max_retries: integerAttr(3) });
+    const graph = makeGraph();
+    const policy = buildRetryPolicy(node, graph);
+    expect(policy.shouldRetry(new Error("validation error: missing field"))).toBe(false);
+  });
+
+  test("returns false for configuration errors", () => {
+    const node = makeNode("n", { max_retries: integerAttr(3) });
+    const graph = makeGraph();
+    const policy = buildRetryPolicy(node, graph);
+    expect(policy.shouldRetry(new Error("configuration error: bad setting"))).toBe(false);
+  });
+
+  test("returns true for rate limit errors", () => {
+    const node = makeNode("n", { max_retries: integerAttr(3) });
+    const graph = makeGraph();
+    const policy = buildRetryPolicy(node, graph);
+    expect(policy.shouldRetry(new Error("rate limit exceeded"))).toBe(true);
+  });
+
+  test("returns false for authentication errors", () => {
+    const node = makeNode("n", { max_retries: integerAttr(3) });
+    const graph = makeGraph();
+    const policy = buildRetryPolicy(node, graph);
+    expect(policy.shouldRetry(new Error("authentication failed 401"))).toBe(false);
   });
 });
 

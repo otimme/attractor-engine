@@ -18,6 +18,7 @@ function defaultShouldRetry(error: Error): boolean {
   if (msg.includes("network") || msg.includes("timeout") || msg.includes("econnrefused")) return true;
   if (msg.includes("authentication") || msg.includes("401") || msg.includes("403")) return false;
   if (msg.includes("bad request") || msg.includes("400")) return false;
+  if (msg.includes("validation") || msg.includes("configuration")) return false;
   return false;
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "os";
 import { join } from "path";
-import { mkdirSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, readdirSync } from "fs";
 import { randomUUID } from "crypto";
 import {
   parse,
@@ -50,6 +50,14 @@ function makeLogsRoot(): string {
   const dir = join(tmpdir(), "attractor-test-" + randomUUID());
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** Find the unique run subdirectory (pipelineId) created under logsRoot. */
+function findRunDir(logsRoot: string): string {
+  const entries = readdirSync(logsRoot, { withFileTypes: true });
+  const subdir = entries.find((e) => e.isDirectory());
+  if (!subdir) return logsRoot;
+  return join(logsRoot, subdir.name);
 }
 
 function buildRunner(
@@ -238,10 +246,11 @@ describe("Execute: linear 3-node pipeline end-to-end", () => {
     expect(result.completedNodes).toContain("task2");
     expect(result.completedNodes).toContain("task3");
 
-    // Verify artifacts exist
-    expect(existsSync(join(logsRoot, "task1", "prompt.md"))).toBe(true);
-    expect(existsSync(join(logsRoot, "task1", "response.md"))).toBe(true);
-    expect(existsSync(join(logsRoot, "task1", "status.json"))).toBe(true);
+    // Verify artifacts exist (under run-specific subdirectory)
+    const runDir = findRunDir(logsRoot);
+    expect(existsSync(join(runDir, "task1", "prompt.md"))).toBe(true);
+    expect(existsSync(join(runDir, "task1", "response.md"))).toBe(true);
+    expect(existsSync(join(runDir, "task1", "status.json"))).toBe(true);
   });
 });
 
@@ -511,7 +520,6 @@ describe("Context updates: visible across nodes", () => {
 describe("Checkpoint: save and resume produces same result", () => {
   test("checkpoint round-trip preserves state", async () => {
     const logsRoot = makeLogsRoot();
-    const checkpointPath = join(logsRoot, "checkpoint.json");
 
     const graph = parse(`
       digraph Checkpoint {
@@ -529,7 +537,9 @@ describe("Checkpoint: save and resume produces same result", () => {
 
     expect(result.outcome.status).toBe(StageStatus.SUCCESS);
 
-    // Verify checkpoint was saved
+    // Verify checkpoint was saved (under run-specific subdirectory)
+    const runDir = findRunDir(logsRoot);
+    const checkpointPath = join(runDir, "checkpoint.json");
     expect(existsSync(checkpointPath)).toBe(true);
 
     // Load checkpoint and verify content
@@ -842,18 +852,19 @@ describe("Integration smoke test from spec section 11.13", () => {
     // Verify $goal expansion happened
     expect(planPromptReceived).toContain("Create a hello world Python script");
 
-    // Verify artifacts exist
-    expect(existsSync(join(logsRoot, "plan", "prompt.md"))).toBe(true);
-    expect(existsSync(join(logsRoot, "plan", "response.md"))).toBe(true);
-    expect(existsSync(join(logsRoot, "plan", "status.json"))).toBe(true);
-    expect(existsSync(join(logsRoot, "implement", "prompt.md"))).toBe(true);
-    expect(existsSync(join(logsRoot, "review", "prompt.md"))).toBe(true);
+    // Verify artifacts exist (under run-specific subdirectory)
+    const runDir = findRunDir(logsRoot);
+    expect(existsSync(join(runDir, "plan", "prompt.md"))).toBe(true);
+    expect(existsSync(join(runDir, "plan", "response.md"))).toBe(true);
+    expect(existsSync(join(runDir, "plan", "status.json"))).toBe(true);
+    expect(existsSync(join(runDir, "implement", "prompt.md"))).toBe(true);
+    expect(existsSync(join(runDir, "review", "prompt.md"))).toBe(true);
 
     // 5. Verify goal gate (implement has goal_gate=true and succeeded)
     // Since outcome is SUCCESS, goal gate is satisfied
 
     // 6. Verify checkpoint
-    const checkpointPath = join(logsRoot, "checkpoint.json");
+    const checkpointPath = join(runDir, "checkpoint.json");
     expect(existsSync(checkpointPath)).toBe(true);
     const checkpoint = await loadCheckpoint(checkpointPath);
     expect(checkpoint.completedNodes).toContain("plan");
