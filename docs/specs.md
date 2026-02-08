@@ -1,6 +1,6 @@
 # Spec Format Reference
 
-Common format shared by `unified-llm-spec.md`, `coding-agent-loop-spec.md`, and `attractor-spec.md`.
+Common format shared by `specs/unified-llm-spec.md`, `specs/coding-agent-loop-spec.md`, and `specs/attractor-spec.md`.
 
 ---
 

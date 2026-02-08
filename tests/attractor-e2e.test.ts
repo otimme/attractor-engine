@@ -1,7 +1,7 @@
 /**
  * End-to-end tests for the attractor pipeline engine.
  *
- * These tests exercise the scenarios described in USAGE.md:
+ * These tests exercise the scenarios described in README.md:
  * - Simple linear pipeline
  * - Branching with conditions
  * - Human-in-the-loop gate

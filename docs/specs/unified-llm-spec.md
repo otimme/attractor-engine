@@ -674,8 +674,8 @@ Provider usage field mapping:
 
 | SDK Field           | OpenAI Field                                         | Anthropic Field                  | Gemini Field                          |
 |---------------------|------------------------------------------------------|----------------------------------|---------------------------------------|
-| input_tokens        | usage.prompt_tokens                                  | usage.input_tokens               | usageMetadata.promptTokenCount        |
-| output_tokens       | usage.completion_tokens                              | usage.output_tokens              | usageMetadata.candidatesTokenCount    |
+| input_tokens        | usage.input_tokens                                   | usage.input_tokens               | usageMetadata.promptTokenCount        |
+| output_tokens       | usage.output_tokens                                  | usage.output_tokens              | usageMetadata.candidatesTokenCount    |
 | reasoning_tokens    | usage.completion_tokens_details.reasoning_tokens     | (see note below)                 | usageMetadata.thoughtsTokenCount      |
 | cache_read_tokens   | usage.prompt_tokens_details.cached_tokens            | usage.cache_read_input_tokens    | usageMetadata.cachedContentTokenCount |
 | cache_write_tokens  | (not provided)                                       | usage.cache_creation_input_tokens| (not provided)                        |
@@ -732,6 +732,8 @@ RECORD RateLimitInfo:
 
 Populated from provider response headers (e.g., `x-ratelimit-remaining-requests`). This data is informational; the library does not use it for proactive throttling.
 
+Note: OpenAI field names shown above are for the Responses API (`/v1/responses`). The Chat Completions API uses `usage.prompt_tokens` and `usage.completion_tokens` instead.
+
 ### 3.13 StreamEvent
 
 All stream events share a `type` discriminator field. The library normalizes provider-specific SSE formats into this unified event model.
@@ -761,6 +763,8 @@ RECORD StreamEvent:
     -- passthrough
     raw               : Dict | None             -- raw provider event for passthrough
 ```
+
+Note: Statically-typed implementations may use flat discriminated-union fields (`toolCallId`, `toolName`, `argumentsDelta`) instead of a shared nullable `tool_call` field, as flat fields enable better type narrowing.
 
 ### 3.14 StreamEventType
 
@@ -1139,7 +1143,7 @@ Provider mapping:
 | auto      | `"auto"`                                                | `{"type": "auto"}`                 | `"AUTO"`                                                   |
 | none      | `"none"`                                                | Omit tools from request            | `"NONE"`                                                   |
 | required  | `"required"`                                            | `{"type": "any"}`                  | `"ANY"`                                                    |
-| named     | `{"type":"function","function":{"name":"..."}}`        | `{"type":"tool","name":"..."}`     | `{"mode":"ANY","allowedFunctionNames":["..."]}`            |
+| named     | `{"type":"function","name":"..."}`                     | `{"type":"tool","name":"..."}`     | `{"mode":"ANY","allowedFunctionNames":["..."]}`            |
 
 Note on Anthropic `none` mode: Anthropic does not support `tool_choice: {"type": "none"}` when tools are present. The adapter must omit the tools array from the request body entirely.
 
