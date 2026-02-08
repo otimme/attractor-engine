@@ -33,7 +33,7 @@ export function assistantMessage(text: string): Message {
 
 export function toolResultMessage(
   toolCallId: string,
-  content: string,
+  content: string | Record<string, unknown> | unknown[],
   isError = false,
 ): Message {
   return {

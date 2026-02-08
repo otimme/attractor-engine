@@ -149,6 +149,8 @@ function mapFinishReason(reason: string, hasToolCalls: boolean): FinishReason {
     case "RECITATION":
       return { reason: "content_filter", raw: reason };
     default:
-      return { reason: "other", raw: reason };
+      return hasToolCalls
+        ? { reason: "tool_calls", raw: reason }
+        : { reason: "other", raw: reason };
   }
 }

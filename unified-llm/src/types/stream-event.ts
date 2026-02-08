@@ -1,4 +1,5 @@
 import type { FinishReason, Usage, Response, Warning } from "./response.js";
+import type { SDKError } from "./errors.js";
 
 export const StreamEventType = {
   STREAM_START: "stream_start",
@@ -101,7 +102,7 @@ export interface FinishEvent {
 
 export interface ErrorEvent {
   type: typeof StreamEventType.ERROR;
-  error: Error;
+  error: SDKError;
   raw?: unknown;
 }
 

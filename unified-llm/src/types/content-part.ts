@@ -85,6 +85,11 @@ export interface CustomPart {
   data: unknown;
 }
 
+/**
+ * Discriminated union of known content part types. Supports switch-based narrowing on `kind`.
+ * For extensibility with custom kinds (spec: `kind: ContentKind | String`),
+ * use `ExtendedContentPart` which adds `CustomPart` to this union.
+ */
 export type ContentPart =
   | TextPart
   | ImagePart
@@ -95,34 +100,38 @@ export type ContentPart =
   | ThinkingPart
   | RedactedThinkingPart;
 
-/** Use `ContentPart | CustomPart` when extensibility is needed. */
+/**
+ * ContentPart extended with CustomPart for arbitrary string kinds.
+ * Use this type when accepting content that may include provider-specific
+ * or user-defined custom kinds beyond the standard ContentKind values.
+ */
 export type ExtendedContentPart = ContentPart | CustomPart;
 
-export function isTextPart(part: ContentPart): part is TextPart {
+export function isTextPart(part: ExtendedContentPart): part is TextPart {
   return part.kind === "text";
 }
 
-export function isImagePart(part: ContentPart): part is ImagePart {
+export function isImagePart(part: ExtendedContentPart): part is ImagePart {
   return part.kind === "image";
 }
 
-export function isAudioPart(part: ContentPart): part is AudioPart {
+export function isAudioPart(part: ExtendedContentPart): part is AudioPart {
   return part.kind === "audio";
 }
 
-export function isDocumentPart(part: ContentPart): part is DocumentPart {
+export function isDocumentPart(part: ExtendedContentPart): part is DocumentPart {
   return part.kind === "document";
 }
 
-export function isToolCallPart(part: ContentPart): part is ToolCallPart {
+export function isToolCallPart(part: ExtendedContentPart): part is ToolCallPart {
   return part.kind === "tool_call";
 }
 
-export function isToolResultPart(part: ContentPart): part is ToolResultPart {
+export function isToolResultPart(part: ExtendedContentPart): part is ToolResultPart {
   return part.kind === "tool_result";
 }
 
-export function isThinkingPart(part: ContentPart): part is ThinkingPart {
+export function isThinkingPart(part: ExtendedContentPart): part is ThinkingPart {
   return part.kind === "thinking";
 }
 
@@ -140,7 +149,7 @@ export const ContentKind = {
 export type ContentKind = (typeof ContentKind)[keyof typeof ContentKind];
 
 export function isRedactedThinkingPart(
-  part: ContentPart,
+  part: ExtendedContentPart,
 ): part is RedactedThinkingPart {
   return part.kind === "redacted_thinking";
 }

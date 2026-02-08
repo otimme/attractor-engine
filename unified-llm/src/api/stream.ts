@@ -20,11 +20,11 @@ import type { StepResult, StreamResult } from "./types.js";
 function toAdapterTimeout(timeout: number | TimeoutConfig, remainingMs?: number): AdapterTimeout {
   if (typeof timeout === "number") {
     const requestMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
-    return { request: requestMs, streamRead: 30_000 };
+    return { connect: 10_000, request: requestMs, streamRead: 30_000 };
   }
   const requestMs = timeout.perStep ?? timeout.total ?? 120_000;
   const clamped = remainingMs != null ? Math.min(requestMs, remainingMs) : requestMs;
-  return { request: clamped, streamRead: 30_000 };
+  return { connect: 10_000, request: clamped, streamRead: 30_000 };
 }
 
 export type StreamOptions = GenerateOptions;
@@ -114,12 +114,26 @@ class StreamResultImpl implements StreamResult {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseArguments(raw: Record<string, unknown> | string): Record<string, unknown> {
+  if (typeof raw !== "string") return raw;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function buildToolCall(tc: { id: string; name: string; arguments: Record<string, unknown> | string }) {
   return {
     id: tc.id,
     name: tc.name,
-    arguments: typeof tc.arguments === "string" ? {} : tc.arguments,
-    rawArguments: typeof tc.arguments === "string" ? tc.arguments : undefined,
+    arguments: parseArguments(tc.arguments),
+    rawArguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
   };
 }
 
@@ -137,7 +151,7 @@ export function stream(options: StreamOptions): StreamResult {
         throw new ConfigurationError(`Invalid tool name "${tool.name}": ${nameError}`);
       }
       const params = tool.parameters;
-      if (Object.keys(params).length > 0 && params["type"] !== "object") {
+      if (params["type"] !== undefined && params["type"] !== "object") {
         throw new ConfigurationError(
           `Tool "${tool.name}" parameters must have "type": "object" at the root`,
         );
@@ -256,26 +270,80 @@ export function stream(options: StreamOptions): StreamResult {
         options.tools.length > 0;
 
       if (hasToolCalls && round < maxToolRounds) {
-        // Emit STEP_FINISH between tool execution rounds
-        yield {
-          type: StreamEventType.STEP_FINISH,
-          finishReason: response.finishReason,
-          usage: response.usage,
-        };
+        // Partition tool calls: passive (defined, no execute), unknown (not defined), active (has execute)
+        const passiveCalls: typeof rawToolCalls = [];
+        const unknownCalls: typeof rawToolCalls = [];
+        const activeCalls: typeof rawToolCalls = [];
+        for (const tc of rawToolCalls) {
+          const toolDef = options.tools?.find((t) => t.name === tc.name);
+          if (!toolDef) {
+            unknownCalls.push(tc);
+          } else if (!toolDef.execute) {
+            passiveCalls.push(tc);
+          } else {
+            activeCalls.push(tc);
+          }
+        }
 
-        // Execute tool calls
+        // If any passive tools, break loop and return to caller
+        if (passiveCalls.length > 0) {
+          const step: StepResult = {
+            text: responseText(response),
+            reasoning: responseReasoning(response) || undefined,
+            toolCalls: rawToolCalls.map(buildToolCall),
+            toolResults: [],
+            finishReason: response.finishReason,
+            usage: response.usage,
+            response,
+            warnings: response.warnings,
+          };
+          steps.push(step);
+          break;
+        }
+
+        // Execute active tool calls + send errors for unknown tools
         const toolResultPromises = rawToolCalls.map(async (tc) => {
           const toolDef = options.tools?.find((t) => t.name === tc.name);
-          if (!toolDef?.execute) {
+          if (!toolDef) {
             return {
               toolCallId: tc.id,
-              content: `Tool "${tc.name}" not found or has no execute handler`,
+              content: `Tool "${tc.name}" not found`,
               isError: true,
             };
           }
-          try {
-            let args = typeof tc.arguments === "string" ? {} : tc.arguments;
+          if (!toolDef.execute) {
+            // Should not reach here (passive tools handled above), but guard anyway
+            return {
+              toolCallId: tc.id,
+              content: `Tool "${tc.name}" has no execute handler`,
+              isError: true,
+            };
+          }
+          // Parse arguments
+          let args: Record<string, unknown>;
+          if (typeof tc.arguments === "string") {
+            try {
+              const parsed: unknown = JSON.parse(tc.arguments);
+              if (!isRecord(parsed)) {
+                return {
+                  toolCallId: tc.id,
+                  content: "Failed to parse tool call arguments",
+                  isError: true,
+                };
+              }
+              args = parsed;
+            } catch {
+              return {
+                toolCallId: tc.id,
+                content: "Failed to parse tool call arguments",
+                isError: true,
+              };
+            }
+          } else {
+            args = tc.arguments;
+          }
 
+          try {
             // Validate arguments against tool schema if parameters are defined
             if (toolDef.parameters && Object.keys(toolDef.parameters).length > 0) {
               const validation = validateJsonSchema(args, toolDef.parameters);
@@ -301,7 +369,11 @@ export function stream(options: StreamOptions): StreamResult {
               toolCallId: tc.id,
             };
             const result = await toolDef.execute(args, context);
-            const content = typeof result === "string" ? result : JSON.stringify(result);
+            const content: string | Record<string, unknown> | unknown[] =
+              typeof result === "string" ? result
+              : Array.isArray(result) ? result
+              : isRecord(result) ? result
+              : String(result);
             return { toolCallId: tc.id, content, isError: false };
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
@@ -323,16 +395,18 @@ export function stream(options: StreamOptions): StreamResult {
           };
         });
 
+        // Emit STEP_FINISH after tool execution, before next model call
+        yield {
+          type: StreamEventType.STEP_FINISH,
+          finishReason: response.finishReason,
+          usage: response.usage,
+        };
+
         // Build step result for stopWhen check
         const step: StepResult = {
           text: responseText(response),
           reasoning: responseReasoning(response) || undefined,
-          toolCalls: rawToolCalls.map((tc) => ({
-            id: tc.id,
-            name: tc.name,
-            arguments: typeof tc.arguments === "string" ? {} : tc.arguments,
-            rawArguments: typeof tc.arguments === "string" ? tc.arguments : undefined,
-          })),
+          toolCalls: rawToolCalls.map(buildToolCall),
           toolResults,
           finishReason: response.finishReason,
           usage: response.usage,
@@ -354,8 +428,7 @@ export function stream(options: StreamOptions): StreamResult {
         // Append assistant message and tool results
         messages.push(response.message);
         for (const tr of toolResults) {
-          const content = typeof tr.content === "string" ? tr.content : JSON.stringify(tr.content);
-          messages.push(toolResultMessage(tr.toolCallId, content, tr.isError));
+          messages.push(toolResultMessage(tr.toolCallId, tr.content, tr.isError));
         }
       } else {
         break;

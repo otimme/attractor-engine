@@ -3,6 +3,7 @@ import { StreamEventType } from "../../types/stream-event.js";
 import type { FinishReason, Usage } from "../../types/response.js";
 import type { SSEEvent } from "../../utils/sse.js";
 import { str, num, optNum, rec } from "../../utils/extract.js";
+import { StreamError } from "../../types/errors.js";
 
 type BlockType = "text" | "tool_use" | "thinking" | "redacted_thinking";
 
@@ -177,7 +178,7 @@ export async function* translateStream(
           : "Unknown stream error";
         yield {
           type: StreamEventType.ERROR,
-          error: new Error(message),
+          error: new StreamError(message),
         };
         break;
       }

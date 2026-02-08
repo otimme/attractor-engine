@@ -20,11 +20,11 @@ export type { ToolExecutionContext } from "../types/tool.js";
 function toAdapterTimeout(timeout: number | TimeoutConfig, remainingMs?: number): AdapterTimeout {
   if (typeof timeout === "number") {
     const requestMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
-    return { request: requestMs, streamRead: 30_000 };
+    return { connect: 10_000, request: requestMs, streamRead: 30_000 };
   }
   const requestMs = timeout.perStep ?? timeout.total ?? 120_000;
   const clamped = remainingMs != null ? Math.min(requestMs, remainingMs) : requestMs;
-  return { request: clamped, streamRead: 30_000 };
+  return { connect: 10_000, request: clamped, streamRead: 30_000 };
 }
 
 export interface GenerateOptions {
@@ -58,12 +58,26 @@ const zeroUsage: Usage = {
   totalTokens: 0,
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseArguments(raw: Record<string, unknown> | string): Record<string, unknown> {
+  if (typeof raw !== "string") return raw;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function buildToolCall(tc: { id: string; name: string; arguments: Record<string, unknown> | string }) {
   return {
     id: tc.id,
     name: tc.name,
-    arguments: typeof tc.arguments === "string" ? {} : tc.arguments,
-    rawArguments: typeof tc.arguments === "string" ? tc.arguments : undefined,
+    arguments: parseArguments(tc.arguments),
+    rawArguments: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
   };
 }
 
@@ -102,7 +116,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         throw new ConfigurationError(`Invalid tool name "${tool.name}": ${nameError}`);
       }
       const params = tool.parameters;
-      if (Object.keys(params).length > 0 && params["type"] !== "object") {
+      if (params["type"] !== undefined && params["type"] !== "object") {
         throw new ConfigurationError(
           `Tool "${tool.name}" parameters must have "type": "object" at the root`,
         );
@@ -188,20 +202,73 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
       options.tools.length > 0;
 
     if (hasToolCalls && round < maxToolRounds) {
-      // Execute all tool calls concurrently
+      // Partition tool calls: passive (defined, no execute), unknown (not defined), active (has execute)
+      const passiveCalls: typeof rawToolCalls = [];
+      const unknownCalls: typeof rawToolCalls = [];
+      const activeCalls: typeof rawToolCalls = [];
+      for (const tc of rawToolCalls) {
+        const toolDef = options.tools?.find((t) => t.name === tc.name);
+        if (!toolDef) {
+          unknownCalls.push(tc);
+        } else if (!toolDef.execute) {
+          passiveCalls.push(tc);
+        } else {
+          activeCalls.push(tc);
+        }
+      }
+
+      // If any passive tools, break loop and return to caller
+      if (passiveCalls.length > 0) {
+        const step = buildStepResult(response, []);
+        steps.push(step);
+        totalUsage = addUsage(totalUsage, response.usage);
+        break;
+      }
+
+      // Execute active tool calls + send errors for unknown tools
       const toolResultPromises = rawToolCalls.map(async (tc) => {
         const toolDef = options.tools?.find((t) => t.name === tc.name);
-        if (!toolDef?.execute) {
+        if (!toolDef) {
           return {
             toolCallId: tc.id,
-            content: `Tool "${tc.name}" not found or has no execute handler`,
+            content: `Tool "${tc.name}" not found`,
+            isError: true,
+          };
+        }
+        if (!toolDef.execute) {
+          // Should not reach here (passive tools handled above), but guard anyway
+          return {
+            toolCallId: tc.id,
+            content: `Tool "${tc.name}" has no execute handler`,
             isError: true,
           };
         }
 
-        try {
-          let args = typeof tc.arguments === "string" ? {} : tc.arguments;
+        // Parse arguments
+        let args: Record<string, unknown>;
+        if (typeof tc.arguments === "string") {
+          try {
+            const parsed: unknown = JSON.parse(tc.arguments);
+            if (!isRecord(parsed)) {
+              return {
+                toolCallId: tc.id,
+                content: "Failed to parse tool call arguments",
+                isError: true,
+              };
+            }
+            args = parsed;
+          } catch {
+            return {
+              toolCallId: tc.id,
+              content: "Failed to parse tool call arguments",
+              isError: true,
+            };
+          }
+        } else {
+          args = tc.arguments;
+        }
 
+        try {
           // Validate arguments against tool schema if parameters are defined
           if (toolDef.parameters && Object.keys(toolDef.parameters).length > 0) {
             const validation = validateJsonSchema(args, toolDef.parameters);
@@ -228,7 +295,11 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
             toolCallId: tc.id,
           };
           const result = await toolDef.execute(args, context);
-          const content = typeof result === "string" ? result : JSON.stringify(result);
+          const content: string | Record<string, unknown> | unknown[] =
+            typeof result === "string" ? result
+            : Array.isArray(result) ? result
+            : isRecord(result) ? result
+            : String(result);
           return {
             toolCallId: tc.id,
             content,
@@ -268,8 +339,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
       // Append assistant message and tool results to conversation
       messages.push(response.message);
       for (const tr of toolResults) {
-        const content = typeof tr.content === "string" ? tr.content : JSON.stringify(tr.content);
-        messages.push(toolResultMessage(tr.toolCallId, content, tr.isError));
+        messages.push(toolResultMessage(tr.toolCallId, tr.content, tr.isError));
       }
     } else {
       // Final step - no tool calls or max rounds reached

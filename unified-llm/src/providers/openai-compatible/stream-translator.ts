@@ -62,6 +62,8 @@ export async function* translateStream(
   // Track active tool call IDs by index for proper lifecycle
   const activeToolCalls = new Map<number, string>();
   let finishReason = "";
+  // Defer FINISH emission so we can merge usage from a trailing usage-only chunk
+  let pendingFinishReason: FinishReason | undefined;
 
   for await (const sse of events) {
     // Emit PROVIDER_EVENT for non-message SSE events
@@ -85,6 +87,15 @@ export async function* translateStream(
         yield { type: StreamEventType.TOOL_CALL_END, toolCallId };
       }
       activeToolCalls.clear();
+      // Emit deferred FINISH if no usage-only chunk followed
+      if (pendingFinishReason) {
+        yield {
+          type: StreamEventType.FINISH,
+          finishReason: pendingFinishReason,
+          usage: undefined,
+        };
+        pendingFinishReason = undefined;
+      }
       continue;
     }
 
@@ -112,10 +123,8 @@ export async function* translateStream(
       const usageData = rec(parsed["usage"]);
       if (usageData) {
         const usage = translateUsage(usageData);
-        const hasToolCalls = activeToolCalls.size > 0 || finishReason === "tool_calls";
-        const reason: FinishReason = hasToolCalls
-          ? { reason: "tool_calls", raw: finishReason || "tool_calls" }
-          : mapFinishReason(finishReason || "stop");
+        const reason = pendingFinishReason ?? mapFinishReason(finishReason || "stop");
+        pendingFinishReason = undefined;
         yield {
           type: StreamEventType.FINISH,
           finishReason: reason,
@@ -180,7 +189,7 @@ export async function* translateStream(
       }
     }
 
-    // On finish_reason, close open text/tool calls and emit finish
+    // On finish_reason, close open text/tool calls and defer finish
     if (typeof choiceFinish === "string") {
       if (textStarted) {
         textStarted = false;
@@ -191,14 +200,18 @@ export async function* translateStream(
       }
       activeToolCalls.clear();
 
-      // Emit finish with usage if present
+      // If usage is in this same chunk, emit FINISH now; otherwise defer
       const usageData = rec(parsed["usage"]);
       const usage = translateUsage(usageData);
-      yield {
-        type: StreamEventType.FINISH,
-        finishReason: mapFinishReason(choiceFinish),
-        usage,
-      };
+      if (usage) {
+        yield {
+          type: StreamEventType.FINISH,
+          finishReason: mapFinishReason(choiceFinish),
+          usage,
+        };
+      } else {
+        pendingFinishReason = mapFinishReason(choiceFinish);
+      }
     }
   }
 }
