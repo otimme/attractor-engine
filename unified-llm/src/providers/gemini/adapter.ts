@@ -10,6 +10,7 @@ import {
   InvalidRequestError,
   RateLimitError,
   ServerError,
+  ContextLengthError,
   ProviderError,
 } from "../../types/errors.js";
 import { httpRequest, httpRequestStream } from "../../utils/http.js";
@@ -53,23 +54,34 @@ function mapError(
     errorObj?.["message"],
     typeof body === "string" ? body : "Unknown error",
   );
+  const errorCode = typeof errorObj?.["status"] === "string"
+    ? errorObj["status"]
+    : typeof errorObj?.["code"] === "string"
+      ? errorObj["code"]
+      : undefined;
 
   switch (status) {
     case 401:
-      return new AuthenticationError(message, provider, body);
+      return new AuthenticationError(message, provider, errorCode, body);
     case 403:
-      return new AccessDeniedError(message, provider, body);
+      return new AccessDeniedError(message, provider, errorCode, body);
     case 404:
-      return new NotFoundError(message, provider, body);
+      return new NotFoundError(message, provider, errorCode, body);
     case 400:
-      return new InvalidRequestError(message, provider, body);
+      return new InvalidRequestError(message, provider, errorCode, body);
+    case 408:
+      return new ServerError(message, provider, errorCode, 408, body);
+    case 413:
+      return new ContextLengthError(message, provider, errorCode, body);
+    case 422:
+      return new InvalidRequestError(message, provider, errorCode, body);
     case 429: {
       const retryAfter = parseRetryAfterHeader(headers);
-      return new RateLimitError(message, provider, retryAfter, body);
+      return new RateLimitError(message, provider, errorCode, retryAfter, body);
     }
     default:
       if (status >= 500) {
-        return new ServerError(message, provider, status, body);
+        return new ServerError(message, provider, errorCode, status, body);
       }
       return undefined;
   }

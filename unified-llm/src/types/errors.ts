@@ -38,29 +38,29 @@ export class ProviderError extends SDKError {
 }
 
 export class AuthenticationError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, statusCode: 401, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, statusCode: 401, errorCode, raw });
     this.name = "AuthenticationError";
   }
 }
 
 export class AccessDeniedError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, statusCode: 403, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, statusCode: 403, errorCode, raw });
     this.name = "AccessDeniedError";
   }
 }
 
 export class NotFoundError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, statusCode: 404, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, statusCode: 404, errorCode, raw });
     this.name = "NotFoundError";
   }
 }
 
 export class InvalidRequestError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, statusCode: 400, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, statusCode: 400, errorCode, raw });
     this.name = "InvalidRequestError";
   }
 }
@@ -69,12 +69,14 @@ export class RateLimitError extends ProviderError {
   constructor(
     message: string,
     provider: string,
+    errorCode?: string,
     retryAfter?: number,
     raw?: unknown,
   ) {
     super(message, provider, {
       retryable: true,
       statusCode: 429,
+      errorCode,
       retryAfter,
       raw,
     });
@@ -86,12 +88,14 @@ export class ServerError extends ProviderError {
   constructor(
     message: string,
     provider: string,
+    errorCode?: string,
     statusCode?: number,
     raw?: unknown,
   ) {
     super(message, provider, {
       retryable: true,
       statusCode: statusCode ?? 500,
+      errorCode,
       raw,
     });
     this.name = "ServerError";
@@ -99,22 +103,22 @@ export class ServerError extends ProviderError {
 }
 
 export class ContentFilterError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, errorCode, raw });
     this.name = "ContentFilterError";
   }
 }
 
 export class ContextLengthError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, errorCode, raw });
     this.name = "ContextLengthError";
   }
 }
 
 export class QuotaExceededError extends ProviderError {
-  constructor(message: string, provider: string, raw?: unknown) {
-    super(message, provider, { retryable: false, raw });
+  constructor(message: string, provider: string, errorCode?: string, raw?: unknown) {
+    super(message, provider, { retryable: false, errorCode, raw });
     this.name = "QuotaExceededError";
   }
 }

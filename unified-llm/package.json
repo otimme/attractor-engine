@@ -10,5 +10,8 @@
   "devDependencies": {
     "typescript": "^5.7.0",
     "@types/bun": "latest"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
   }
 }

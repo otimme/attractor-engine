@@ -70,7 +70,7 @@ describe("error hierarchy", () => {
   });
 
   test("RateLimitError is retryable with retryAfter", () => {
-    const err = new RateLimitError("rate limited", "anthropic", 5);
+    const err = new RateLimitError("rate limited", "anthropic", undefined, 5);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(true);
     expect(err.statusCode).toBe(429);
@@ -78,7 +78,7 @@ describe("error hierarchy", () => {
   });
 
   test("ServerError is retryable", () => {
-    const err = new ServerError("internal error", "openai", 503);
+    const err = new ServerError("internal error", "openai", undefined, 503);
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.retryable).toBe(true);
     expect(err.statusCode).toBe(503);

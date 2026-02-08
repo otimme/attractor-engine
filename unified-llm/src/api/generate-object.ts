@@ -2,6 +2,7 @@ import type { Message } from "../types/message.js";
 import type { ToolChoice } from "../types/tool.js";
 import { NoObjectGeneratedError } from "../types/errors.js";
 import { safeJsonParse } from "../utils/json.js";
+import { validateJsonSchema } from "../utils/validate-json-schema.js";
 import { generate } from "./generate.js";
 import type { GenerateOptions } from "./generate.js";
 import type { GenerateResult } from "./types.js";
@@ -54,6 +55,13 @@ export async function generateObject(
     );
   }
 
+  const validation = validateJsonSchema(toolCall.arguments, schema);
+  if (!validation.valid) {
+    throw new NoObjectGeneratedError(
+      `Model output does not match schema: ${validation.errors}`,
+    );
+  }
+
   return {
     ...result,
     output: toolCall.arguments,
@@ -97,6 +105,13 @@ export async function generateObjectWithJsonSchema(
   if (!parsed.success) {
     throw new NoObjectGeneratedError(
       `Failed to parse model output as JSON: ${parsed.error.message}`,
+    );
+  }
+
+  const validation = validateJsonSchema(parsed.value, schema);
+  if (!validation.valid) {
+    throw new NoObjectGeneratedError(
+      `Model output does not match schema: ${validation.errors}`,
     );
   }
 

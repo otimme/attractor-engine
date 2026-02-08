@@ -13,6 +13,8 @@ function mapFinishReason(status: string): Response["finishReason"] {
       return { reason: "length", raw: status };
     case "failed":
       return { reason: "error", raw: status };
+    case "content_filter":
+      return { reason: "content_filter", raw: status };
     default:
       return { reason: "other", raw: status };
   }

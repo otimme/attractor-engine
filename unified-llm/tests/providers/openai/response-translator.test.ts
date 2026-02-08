@@ -210,6 +210,22 @@ describe("OpenAI Response Translator", () => {
     expect(response.rateLimit).toEqual(rateLimit);
   });
 
+  test("maps content_filter status to content_filter finish reason", () => {
+    const body = {
+      id: "resp_cf",
+      model: "gpt-4o",
+      status: "content_filter",
+      output: [],
+      usage: { input_tokens: 5, output_tokens: 0 },
+    };
+
+    const response = translateResponse(body);
+    expect(response.finishReason).toEqual({
+      reason: "content_filter",
+      raw: "content_filter",
+    });
+  });
+
   test("handles missing usage gracefully", () => {
     const body = {
       id: "resp_008",

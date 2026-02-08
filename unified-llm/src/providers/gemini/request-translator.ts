@@ -211,12 +211,12 @@ export function translateRequest(request: Request): TranslatedRequest {
 
     if (!isNoneMode) {
       body.tools = translateTools(request.tools);
+    }
 
-      if (request.toolChoice) {
-        const translated = translateToolChoice(request.toolChoice);
-        if (translated) {
-          body.toolConfig = translated;
-        }
+    if (request.toolChoice) {
+      const translated = translateToolChoice(request.toolChoice);
+      if (translated) {
+        body.toolConfig = translated;
       }
     }
   }

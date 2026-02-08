@@ -121,6 +121,28 @@ describe("generateObject (tool extraction)", () => {
     ).rejects.toThrow(NoObjectGeneratedError);
   });
 
+  test("throws NoObjectGeneratedError when tool call arguments don't match schema", async () => {
+    const adapter = new StubAdapter("stub", [
+      {
+        response: makeToolCallResponse("extract", { name: 123 }),
+      },
+    ]);
+    const client = makeClient(adapter);
+
+    await expect(
+      generateObject({
+        model: "test-model",
+        prompt: "Extract",
+        schema: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+        },
+        client,
+      }),
+    ).rejects.toThrow(NoObjectGeneratedError);
+  });
+
   test("forces tool choice to named extract tool", async () => {
     const adapter = new StubAdapter("stub", [
       {
@@ -188,6 +210,26 @@ describe("generateObjectWithJsonSchema", () => {
       },
       strict: true,
     });
+  });
+
+  test("throws NoObjectGeneratedError when JSON doesn't match schema", async () => {
+    const adapter = new StubAdapter("stub", [
+      { response: makeTextResponse('{"name": 123}') },
+    ]);
+    const client = makeClient(adapter);
+
+    await expect(
+      generateObjectWithJsonSchema({
+        model: "test-model",
+        prompt: "Extract",
+        schema: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          required: ["name"],
+        },
+        client,
+      }),
+    ).rejects.toThrow(NoObjectGeneratedError);
   });
 
   test("throws NoObjectGeneratedError on invalid JSON", async () => {

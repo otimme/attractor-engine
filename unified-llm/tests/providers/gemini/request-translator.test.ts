@@ -367,7 +367,7 @@ describe("Gemini request translator", () => {
     });
   });
 
-  test("translates toolChoice none by omitting tools", () => {
+  test("translates toolChoice none by omitting tools but sending NONE mode", () => {
     const request: Request = {
       model: "gemini-3-pro-preview",
       messages: [
@@ -380,7 +380,9 @@ describe("Gemini request translator", () => {
     const { body } = translateRequest(request);
 
     expect(body.tools).toBeUndefined();
-    expect(body.toolConfig).toBeUndefined();
+    expect(body.toolConfig).toEqual({
+      functionCallingConfig: { mode: "NONE" },
+    });
   });
 
   test("translates toolChoice required", () => {

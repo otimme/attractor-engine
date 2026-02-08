@@ -384,4 +384,51 @@ describe("Anthropic stream translator", () => {
     expect(events).toHaveLength(1);
     expect(events.at(0)?.type).toBe(StreamEventType.STREAM_START);
   });
+
+  test("estimates reasoningTokens from thinking deltas on FINISH", async () => {
+    const thinkingText = "Let me think carefully about this...";
+    const sseEvents: SSEEvent[] = [
+      makeSSE({
+        type: "message_start",
+        message: { model: "claude-opus-4-6", usage: { input_tokens: 15 } },
+      }),
+      makeSSE({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking" },
+      }),
+      makeSSE({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: thinkingText },
+      }),
+      makeSSE({ type: "content_block_stop", index: 0 }),
+      makeSSE({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
+      }),
+      makeSSE({
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "Answer" },
+      }),
+      makeSSE({ type: "content_block_stop", index: 1 }),
+      makeSSE({
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 30 },
+      }),
+      makeSSE({ type: "message_stop" }),
+    ];
+
+    const events = await collectEvents(sseEvents);
+
+    const finish = events.find((e) => e.type === StreamEventType.FINISH);
+    expect(finish?.type).toBe(StreamEventType.FINISH);
+    if (finish?.type === StreamEventType.FINISH) {
+      expect(finish.usage?.reasoningTokens).toBe(Math.ceil(thinkingText.length / 4));
+      expect(finish.usage?.reasoningTokens).toBeGreaterThan(0);
+    }
+  });
 });

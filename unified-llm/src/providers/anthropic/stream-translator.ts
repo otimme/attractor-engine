@@ -20,6 +20,7 @@ export async function* translateStream(
   let model: string | undefined;
   let messageId: string | undefined;
   let finishReason = "stop";
+  let reasoningTextLength = 0;
 
   for await (const event of events) {
     if (event.data === "[DONE]") {
@@ -106,9 +107,11 @@ export async function* translateStream(
             argumentsDelta: str(delta["partial_json"]),
           };
         } else if (deltaType === "thinking_delta") {
+          const thinkingText = str(delta["thinking"]);
+          reasoningTextLength += thinkingText.length;
           yield {
             type: StreamEventType.REASONING_DELTA,
-            reasoningDelta: str(delta["thinking"]),
+            reasoningDelta: thinkingText,
           };
         }
         break;
@@ -149,6 +152,7 @@ export async function* translateStream(
           inputTokens,
           outputTokens,
           totalTokens: inputTokens + outputTokens,
+          reasoningTokens: reasoningTextLength > 0 ? Math.ceil(reasoningTextLength / 4) : undefined,
           cacheReadTokens,
           cacheWriteTokens,
         };

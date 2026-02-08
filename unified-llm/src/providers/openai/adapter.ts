@@ -41,6 +41,18 @@ function extractErrorMessage(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body);
 }
 
+function extractErrorCode(body: unknown): string | undefined {
+  const obj = rec(body);
+  if (obj) {
+    const errorObj = rec(obj["error"]);
+    if (errorObj) {
+      if (typeof errorObj["code"] === "string") return errorObj["code"];
+      if (typeof errorObj["type"] === "string") return errorObj["type"];
+    }
+  }
+  return undefined;
+}
+
 function extractRetryAfter(body: unknown, headers: Headers): number | undefined {
   // Prefer Retry-After header over body field
   const headerValue = headers.get("retry-after");
@@ -67,6 +79,7 @@ function mapError(
   headers: Headers,
 ): ProviderError | undefined {
   const message = extractErrorMessage(body);
+  const errorCode = extractErrorCode(body);
 
   switch (status) {
     case 400: {
@@ -76,23 +89,29 @@ function mapError(
         lower.includes("too many tokens") ||
         lower.includes("maximum context")
       ) {
-        return new ContextLengthError(message, provider, body);
+        return new ContextLengthError(message, provider, errorCode, body);
       }
-      return new InvalidRequestError(message, provider, body);
+      return new InvalidRequestError(message, provider, errorCode, body);
     }
     case 401:
-      return new AuthenticationError(message, provider, body);
+      return new AuthenticationError(message, provider, errorCode, body);
     case 403:
-      return new AccessDeniedError(message, provider, body);
+      return new AccessDeniedError(message, provider, errorCode, body);
     case 404:
-      return new NotFoundError(message, provider, body);
+      return new NotFoundError(message, provider, errorCode, body);
+    case 408:
+      return new ServerError(message, provider, errorCode, 408, body);
+    case 413:
+      return new ContextLengthError(message, provider, errorCode, body);
+    case 422:
+      return new InvalidRequestError(message, provider, errorCode, body);
     case 429: {
       const retryAfter = extractRetryAfter(body, headers);
-      return new RateLimitError(message, provider, retryAfter, body);
+      return new RateLimitError(message, provider, errorCode, retryAfter, body);
     }
     default:
       if (status >= 500) {
-        return new ServerError(message, provider, status, body);
+        return new ServerError(message, provider, errorCode, status, body);
       }
       return undefined;
   }

@@ -11,3 +11,4 @@ export { str, num, optNum, optStr, rec, recArray, recOrEmpty } from "./extract.j
 export { readImageFile, isLocalFilePath } from "./file-image.js";
 export type { FileImageResult } from "./file-image.js";
 export { resolveFileImages } from "./resolve-file-images.js";
+export { validateJsonSchema } from "./validate-json-schema.js";

@@ -57,26 +57,32 @@ function mapError(
 
   switch (status) {
     case 401:
-      return new AuthenticationError(message, provider, body);
+      return new AuthenticationError(message, provider, errorType, body);
     case 403:
-      return new AccessDeniedError(message, provider, body);
+      return new AccessDeniedError(message, provider, errorType, body);
     case 404:
-      return new NotFoundError(message, provider, body);
+      return new NotFoundError(message, provider, errorType, body);
     case 400: {
       if (errorType === "invalid_request_error" && /context|token/.test(message)) {
-        return new ContextLengthError(message, provider, body);
+        return new ContextLengthError(message, provider, errorType, body);
       }
-      return new InvalidRequestError(message, provider, body);
+      return new InvalidRequestError(message, provider, errorType, body);
     }
     case 429: {
       const retryAfter = parseRetryAfterHeader(headers);
-      return new RateLimitError(message, provider, retryAfter, body);
+      return new RateLimitError(message, provider, errorType, retryAfter, body);
     }
+    case 408:
+      return new ServerError(message, provider, errorType, 408, body);
+    case 413:
+      return new ContextLengthError(message, provider, errorType, body);
+    case 422:
+      return new InvalidRequestError(message, provider, errorType, body);
     case 529:
-      return new ServerError(message, provider, status, body);
+      return new ServerError(message, provider, errorType, status, body);
     default:
       if (status >= 500) {
-        return new ServerError(message, provider, status, body);
+        return new ServerError(message, provider, errorType, status, body);
       }
       return undefined;
   }

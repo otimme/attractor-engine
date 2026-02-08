@@ -227,4 +227,25 @@ describe("Anthropic response translator", () => {
 
     expect(response.rateLimit).toEqual(rateLimit);
   });
+
+  test("estimates reasoningTokens from thinking block text", () => {
+    const thinkingText = "Let me analyze this carefully step by step...";
+    const body = {
+      id: "msg_reasoning",
+      model: "claude-opus-4-6",
+      type: "message",
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: thinkingText, signature: "sig_xyz" },
+        { type: "text", text: "The answer is 42." },
+      ],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 30, output_tokens: 25 },
+    };
+
+    const response = translateResponse(body);
+
+    expect(response.usage.reasoningTokens).toBe(Math.ceil(thinkingText.length / 4));
+    expect(response.usage.reasoningTokens).toBeGreaterThan(0);
+  });
 });

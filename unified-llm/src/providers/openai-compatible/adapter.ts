@@ -19,6 +19,7 @@ import { str, rec } from "../../utils/extract.js";
 import { translateRequest } from "./request-translator.js";
 import { translateResponse } from "./response-translator.js";
 import { translateStream } from "./stream-translator.js";
+import { resolveFileImages } from "../../utils/resolve-file-images.js";
 
 export interface OpenAICompatibleAdapterOptions {
   baseUrl: string;
@@ -36,6 +37,18 @@ function extractErrorMessage(body: unknown): string {
     }
   }
   return typeof body === "string" ? body : JSON.stringify(body);
+}
+
+function extractErrorCode(body: unknown): string | undefined {
+  const obj = rec(body);
+  if (obj) {
+    const errorObj = rec(obj["error"]);
+    if (errorObj) {
+      if (typeof errorObj["code"] === "string") return errorObj["code"];
+      if (typeof errorObj["type"] === "string") return errorObj["type"];
+    }
+  }
+  return undefined;
 }
 
 function extractRetryAfter(body: unknown, headers: Headers): number | undefined {
@@ -64,6 +77,7 @@ function mapError(
   headers: Headers,
 ): ProviderError | undefined {
   const message = extractErrorMessage(body);
+  const errorCode = extractErrorCode(body);
 
   switch (status) {
     case 400: {
@@ -73,23 +87,29 @@ function mapError(
         lower.includes("too many tokens") ||
         lower.includes("maximum context")
       ) {
-        return new ContextLengthError(message, provider, body);
+        return new ContextLengthError(message, provider, errorCode, body);
       }
-      return new InvalidRequestError(message, provider, body);
+      return new InvalidRequestError(message, provider, errorCode, body);
     }
     case 401:
-      return new AuthenticationError(message, provider, body);
+      return new AuthenticationError(message, provider, errorCode, body);
     case 403:
-      return new AccessDeniedError(message, provider, body);
+      return new AccessDeniedError(message, provider, errorCode, body);
     case 404:
-      return new NotFoundError(message, provider, body);
+      return new NotFoundError(message, provider, errorCode, body);
+    case 408:
+      return new ServerError(message, provider, errorCode, 408, body);
+    case 413:
+      return new ContextLengthError(message, provider, errorCode, body);
+    case 422:
+      return new InvalidRequestError(message, provider, errorCode, body);
     case 429: {
       const retryAfter = extractRetryAfter(body, headers);
-      return new RateLimitError(message, provider, retryAfter, body);
+      return new RateLimitError(message, provider, errorCode, retryAfter, body);
     }
     default:
       if (status >= 500) {
-        return new ServerError(message, provider, status, body);
+        return new ServerError(message, provider, errorCode, status, body);
       }
       return undefined;
   }
@@ -127,15 +147,18 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   async complete(request: Request): Promise<Response> {
-    const { body, headers: extraHeaders } = translateRequest(request, false);
+    const resolved = await resolveFileImages(request);
+    const { body, headers: extraHeaders } = translateRequest(resolved, false);
     const url = `${this.baseUrl}/v1/chat/completions`;
+    const timeout = request.timeout ?? this.timeout;
 
     const httpResponse = await httpRequest({
       url,
       method: "POST",
       headers: this.buildHeaders(extraHeaders),
       body,
-      timeout: this.timeout,
+      timeout,
+      signal: request.abortSignal,
       mapError,
       provider: this.name,
     });
@@ -145,15 +168,18 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
   }
 
   async *stream(request: Request): AsyncGenerator<StreamEvent> {
-    const { body, headers: extraHeaders } = translateRequest(request, true);
+    const resolved = await resolveFileImages(request);
+    const { body, headers: extraHeaders } = translateRequest(resolved, true);
     const url = `${this.baseUrl}/v1/chat/completions`;
+    const timeout = request.timeout ?? this.timeout;
 
     const { body: streamBody } = await httpRequestStream({
       url,
       method: "POST",
       headers: this.buildHeaders(extraHeaders),
       body,
-      timeout: this.timeout,
+      timeout,
+      signal: request.abortSignal,
       mapError,
       provider: this.name,
     });

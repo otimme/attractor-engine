@@ -1,6 +1,8 @@
 import type { StreamEvent } from "../types/stream-event.js";
 import { StreamEventType } from "../types/stream-event.js";
 import { partialJsonParse } from "../utils/json.js";
+import { validateJsonSchema } from "../utils/validate-json-schema.js";
+import { NoObjectGeneratedError } from "../types/errors.js";
 import { stream } from "./stream.js";
 import type { GenerateOptions } from "./generate.js";
 import type { Client } from "../client/client.js";
@@ -72,6 +74,15 @@ export async function* streamObject(
       }
     }
   }
+
+  if (lastParsed !== undefined) {
+    const validation = validateJsonSchema(lastParsed, schema);
+    if (!validation.valid) {
+      throw new NoObjectGeneratedError(
+        `Streamed object does not match schema: ${validation.errors}`,
+      );
+    }
+  }
 }
 
 export async function* streamObjectWithJsonSchema(
@@ -99,6 +110,15 @@ export async function* streamObjectWithJsonSchema(
         lastParsed = parsed;
         yield parsed;
       }
+    }
+  }
+
+  if (lastParsed !== undefined) {
+    const validation = validateJsonSchema(lastParsed, schema);
+    if (!validation.valid) {
+      throw new NoObjectGeneratedError(
+        `Streamed object does not match schema: ${validation.errors}`,
+      );
     }
   }
 }

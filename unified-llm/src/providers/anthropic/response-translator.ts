@@ -70,6 +70,13 @@ export function translateResponse(
     }
   }
 
+  let reasoningTextLength = 0;
+  for (const part of parts) {
+    if (part.kind === "thinking") {
+      reasoningTextLength += part.thinking.text.length;
+    }
+  }
+
   const stopReason = str(body["stop_reason"]);
 
   const inputTokens = num(usageData?.["input_tokens"]);
@@ -81,6 +88,7 @@ export function translateResponse(
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
+    reasoningTokens: reasoningTextLength > 0 ? Math.ceil(reasoningTextLength / 4) : undefined,
     cacheReadTokens,
     cacheWriteTokens,
     raw: usageData,
