@@ -108,7 +108,7 @@ describe("integration smoke test", () => {
     await eventCollector;
 
     // Verify final state
-    expect(session.state).toBe(SessionState.IDLE);
+    expect(session.state).toBe(SessionState.AWAITING_INPUT);
 
     // Verify history structure
     // user, assistant(tc1), tool_results, assistant(tc2), tool_results, assistant(text)

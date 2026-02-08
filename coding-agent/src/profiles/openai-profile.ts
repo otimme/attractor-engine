@@ -56,6 +56,7 @@ export function createOpenAIProfile(
       environment: ExecutionEnvironment,
       projectDocs: string,
       envOptions?: EnvironmentContextOptions,
+      userInstructions?: string,
     ): string {
       const envContext = buildEnvironmentContext(environment, envOptions);
       const toolDescs = registry
@@ -67,6 +68,7 @@ export function createOpenAIProfile(
         envContext,
         toolDescs,
         projectDocs,
+        userInstructions,
       );
     },
 
@@ -74,6 +76,8 @@ export function createOpenAIProfile(
       return registry.definitions();
     },
 
+    // reasoningEffort is passed via Request.reasoningEffort, which the
+    // OpenAI request translator maps to body.reasoning.effort directly.
     providerOptions(): Record<string, Record<string, unknown>> | null {
       return null;
     },

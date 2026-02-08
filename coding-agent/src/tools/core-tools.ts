@@ -1,6 +1,33 @@
 import type { RegisteredTool } from "../types/index.js";
 import type { ExecutionEnvironment } from "../types/index.js";
 
+const IMAGE_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico",
+]);
+
+const MAX_IMAGE_SIZE = 1_000_000; // 1 MB
+
+const MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+};
+
+function getExtension(filePath: string): string {
+  const lastDot = filePath.lastIndexOf(".");
+  if (lastDot < 0) return "";
+  return filePath.slice(lastDot).toLowerCase();
+}
+
+function isImageFile(filePath: string): boolean {
+  return IMAGE_EXTENSIONS.has(getExtension(filePath));
+}
+
 /**
  * Strip line-number prefixes produced by env.readFile().
  * Format is "  N | content" — we strip everything up to and including " | ".
@@ -39,6 +66,37 @@ export function createReadFileTool(): RegisteredTool {
       const filePath = args.file_path as string;
       const offset = args.offset as number | undefined;
       const limit = args.limit as number | undefined;
+
+      if (isImageFile(filePath)) {
+        const exists = await env.fileExists(filePath);
+        if (!exists) {
+          throw new Error(`File not found: ${filePath}`);
+        }
+
+        // Use shell to get file size
+        const sizeResult = await env.execCommand(
+          `wc -c < '${filePath.replace(/'/g, "'\\''")}'`,
+          5000,
+        );
+        const fileSize = parseInt(sizeResult.stdout.trim(), 10);
+
+        if (isNaN(fileSize) || fileSize > MAX_IMAGE_SIZE) {
+          const sizeDesc = isNaN(fileSize) ? "unknown size" : `${fileSize} bytes`;
+          return `[Image file: ${filePath} (${sizeDesc}). Use the shell tool to process this image if needed.]`;
+        }
+
+        // Read as base64
+        const b64Result = await env.execCommand(
+          `base64 < '${filePath.replace(/'/g, "'\\''")}'`,
+          5000,
+        );
+        const base64Data = b64Result.stdout.replace(/\s/g, "");
+        const ext = getExtension(filePath);
+        const mimeType = MIME_TYPES[ext] ?? "application/octet-stream";
+
+        return `data:${mimeType};base64,${base64Data}`;
+      }
+
       return env.readFile(filePath, offset, limit);
     },
   };
@@ -63,7 +121,7 @@ export function createWriteFileTool(): RegisteredTool {
       const filePath = args.file_path as string;
       const content = args.content as string;
       await env.writeFile(filePath, content);
-      return `Wrote ${content.length} bytes to ${filePath}`;
+      return `Wrote ${Buffer.byteLength(content, "utf-8")} bytes to ${filePath}`;
     },
   };
 }

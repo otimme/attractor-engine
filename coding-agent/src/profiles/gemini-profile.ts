@@ -10,6 +10,10 @@ import {
   createGrepTool,
   createGlobTool,
 } from "../tools/core-tools.js";
+import {
+  createListDirTool,
+  createReadManyFilesTool,
+} from "../tools/gemini-tools.js";
 import type { SessionFactory, SubAgentDepthConfig } from "../tools/subagent-tools.js";
 import {
   createSpawnAgentTool,
@@ -37,6 +41,8 @@ export function createGeminiProfile(
   );
   registry.register(createGrepTool());
   registry.register(createGlobTool());
+  registry.register(createListDirTool());
+  registry.register(createReadManyFilesTool());
 
   if (options?.sessionFactory) {
     const agents = new Map<string, SubAgentHandle>();
@@ -56,6 +62,7 @@ export function createGeminiProfile(
       environment: ExecutionEnvironment,
       projectDocs: string,
       envOptions?: EnvironmentContextOptions,
+      userInstructions?: string,
     ): string {
       const envContext = buildEnvironmentContext(environment, envOptions);
       const toolDescs = registry
@@ -67,6 +74,7 @@ export function createGeminiProfile(
         envContext,
         toolDescs,
         projectDocs,
+        userInstructions,
       );
     },
 
@@ -75,7 +83,16 @@ export function createGeminiProfile(
     },
 
     providerOptions(): Record<string, Record<string, unknown>> | null {
-      return null;
+      return {
+        gemini: {
+          safety_settings: [
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_NONE",
+            },
+          ],
+        },
+      };
     },
 
     supportsReasoning: false,

@@ -44,6 +44,92 @@ describe("read_file", () => {
       tool.executor({ file_path: "/no/such/file" }, env),
     ).rejects.toThrow("File not found");
   });
+
+  test("returns base64 data URI for small image file", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([["/test/icon.png", "PNG_BINARY_DATA"]]),
+      commandResults: new Map([
+        ["wc -c < '/test/icon.png'", {
+          stdout: "100\n",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+          durationMs: 5,
+        }],
+        ["base64 < '/test/icon.png'", {
+          stdout: "UFNHX0JJTkFSWV9EQVRB\n",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+          durationMs: 5,
+        }],
+      ]),
+    });
+    const tool = createReadFileTool();
+    const result = await tool.executor({ file_path: "/test/icon.png" }, env);
+    expect(result).toBe("data:image/png;base64,UFNHX0JJTkFSWV9EQVRB");
+  });
+
+  test("returns descriptive message for large image file", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([["/test/big.jpg", "LARGE_IMAGE"]]),
+      commandResults: new Map([
+        ["wc -c < '/test/big.jpg'", {
+          stdout: "2000000\n",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+          durationMs: 5,
+        }],
+      ]),
+    });
+    const tool = createReadFileTool();
+    const result = await tool.executor({ file_path: "/test/big.jpg" }, env);
+    expect(result).toContain("Image file: /test/big.jpg");
+    expect(result).toContain("2000000 bytes");
+    expect(result).toContain("Use the shell tool to process this image if needed.");
+  });
+
+  test("throws for nonexistent image file", async () => {
+    const env = new StubExecutionEnvironment();
+    const tool = createReadFileTool();
+    await expect(
+      tool.executor({ file_path: "/test/missing.png" }, env),
+    ).rejects.toThrow("File not found");
+  });
+
+  test("detects all supported image extensions", async () => {
+    const extensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"];
+    const tool = createReadFileTool();
+
+    const results = await Promise.all(
+      extensions.map(async (ext) => {
+        const path = `/test/image${ext}`;
+        const env = new StubExecutionEnvironment({
+          files: new Map([[path, "data"]]),
+          commandResults: new Map([
+            [`wc -c < '${path}'`, {
+              stdout: "50\n",
+              stderr: "",
+              exitCode: 0,
+              timedOut: false,
+              durationMs: 5,
+            }],
+            [`base64 < '${path}'`, {
+              stdout: "AAAA\n",
+              stderr: "",
+              exitCode: 0,
+              timedOut: false,
+              durationMs: 5,
+            }],
+          ]),
+        });
+        return tool.executor({ file_path: path }, env);
+      }),
+    );
+
+    expect(results.every((r) => r.startsWith("data:"))).toBe(true);
+  });
 });
 
 describe("write_file", () => {
@@ -56,6 +142,18 @@ describe("write_file", () => {
     );
     expect(result).toBe("Wrote 11 bytes to /test/out.txt");
     expect(await env.fileExists("/test/out.txt")).toBe(true);
+  });
+
+  test("reports correct byte count for multi-byte characters", async () => {
+    const env = new StubExecutionEnvironment();
+    const tool = createWriteFileTool();
+    // The emoji takes 4 bytes in UTF-8, so total is 4 not 2 (.length)
+    const content = "\u{1F600}"; // grinning face emoji
+    const result = await tool.executor(
+      { file_path: "/test/emoji.txt", content },
+      env,
+    );
+    expect(result).toBe("Wrote 4 bytes to /test/emoji.txt");
   });
 });
 

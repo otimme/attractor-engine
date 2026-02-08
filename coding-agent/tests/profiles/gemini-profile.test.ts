@@ -18,6 +18,8 @@ describe("createGeminiProfile", () => {
     expect(names).toContain("shell");
     expect(names).toContain("grep");
     expect(names).toContain("glob");
+    expect(names).toContain("list_dir");
+    expect(names).toContain("read_many_files");
   });
 
   test("system prompt includes coding agent identity", () => {
@@ -41,14 +43,23 @@ describe("createGeminiProfile", () => {
 
   test("tools() returns definitions matching registry", () => {
     const defs = profile.tools();
-    expect(defs.length).toBe(6);
+    expect(defs.length).toBe(8);
     const names = defs.map((d) => d.name);
     expect(names).toContain("read_file");
     expect(names).toContain("edit_file");
+    expect(names).toContain("list_dir");
+    expect(names).toContain("read_many_files");
   });
 
-  test("providerOptions returns null", () => {
-    expect(profile.providerOptions()).toBeNull();
+  test("providerOptions returns gemini safety settings", () => {
+    const opts = profile.providerOptions();
+    expect(opts).not.toBeNull();
+    const gemini = opts?.gemini;
+    expect(gemini).toBeDefined();
+    const settings = gemini?.safety_settings as Array<Record<string, string>>;
+    expect(settings).toHaveLength(1);
+    expect(settings[0]?.category).toBe("HARM_CATEGORY_DANGEROUS_CONTENT");
+    expect(settings[0]?.threshold).toBe("BLOCK_NONE");
   });
 
   test("has correct capability flags", () => {
@@ -95,6 +106,63 @@ describe("createGeminiProfile", () => {
     expect(names).toContain("send_input");
     expect(names).toContain("wait");
     expect(names).toContain("close_agent");
-    expect(profileWithSubagents.tools().length).toBe(10);
+    expect(profileWithSubagents.tools().length).toBe(12);
+  });
+
+  test("list_dir returns formatted directory listing", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/project/src/index.ts", "export {}"],
+        ["/project/src/utils/helper.ts", "export function help() {}"],
+        ["/project/README.md", "# Project"],
+      ]),
+    });
+    const tool = profile.toolRegistry.get("list_dir");
+    expect(tool).toBeDefined();
+    const result = await tool!.executor({ path: "/project" }, env);
+    expect(result).toContain("/project/");
+    expect(result).toContain("src/");
+    expect(result).toContain("README.md");
+  });
+
+  test("list_dir shows empty directory", async () => {
+    const env = new StubExecutionEnvironment();
+    const tool = profile.toolRegistry.get("list_dir");
+    expect(tool).toBeDefined();
+    const result = await tool!.executor({ path: "/empty" }, env);
+    expect(result).toContain("(empty)");
+  });
+
+  test("read_many_files returns concatenated content", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/a.ts", "const a = 1;"],
+        ["/b.ts", "const b = 2;"],
+      ]),
+    });
+    const tool = profile.toolRegistry.get("read_many_files");
+    expect(tool).toBeDefined();
+    const result = await tool!.executor({ paths: ["/a.ts", "/b.ts"] }, env);
+    expect(result).toContain("=== /a.ts ===");
+    expect(result).toContain("=== /b.ts ===");
+    expect(result).toContain("const a = 1;");
+    expect(result).toContain("const b = 2;");
+  });
+
+  test("read_many_files includes error for missing files", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/exists.ts", "hello"],
+      ]),
+    });
+    const tool = profile.toolRegistry.get("read_many_files");
+    expect(tool).toBeDefined();
+    const result = await tool!.executor(
+      { paths: ["/exists.ts", "/missing.ts"] },
+      env,
+    );
+    expect(result).toContain("=== /exists.ts ===");
+    expect(result).toContain("=== /missing.ts ===");
+    expect(result).toContain("[ERROR:");
   });
 });

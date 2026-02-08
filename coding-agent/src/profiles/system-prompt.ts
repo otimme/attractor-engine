@@ -21,6 +21,18 @@ export function buildEnvironmentContext(
   if (options?.gitBranch) {
     lines.push(`Git branch: ${options.gitBranch}`);
   }
+  if (options?.modifiedCount !== undefined) {
+    lines.push(`Modified files: ${options.modifiedCount}`);
+  }
+  if (options?.untrackedCount !== undefined) {
+    lines.push(`Untracked files: ${options.untrackedCount}`);
+  }
+  if (options?.recentCommits && options.recentCommits.length > 0) {
+    lines.push("Recent commits:");
+    for (const commit of options.recentCommits) {
+      lines.push(`  ${commit}`);
+    }
+  }
   if (options?.modelDisplayName) {
     lines.push(`Model: ${options.modelDisplayName}`);
   }

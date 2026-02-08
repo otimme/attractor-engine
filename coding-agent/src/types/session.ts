@@ -26,19 +26,22 @@ export interface SessionConfig {
   loopDetectionWindow: number;
   maxSubagentDepth: number;
   toolCallInterceptor?: ToolCallInterceptor;
+  userInstructions?: string;
+  enableStreaming: boolean;
 }
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
   maxTurns: 0,
-  maxToolRoundsPerInput: 50,
-  defaultCommandTimeoutMs: 120_000,
+  maxToolRoundsPerInput: 200,
+  defaultCommandTimeoutMs: 10_000,
   maxCommandTimeoutMs: 600_000,
   reasoningEffort: null,
   toolOutputLimits: undefined,
   toolLineLimits: undefined,
   enableLoopDetection: true,
-  loopDetectionWindow: 5,
+  loopDetectionWindow: 10,
   maxSubagentDepth: 1,
+  enableStreaming: false,
 };
 
 export interface UserTurn {

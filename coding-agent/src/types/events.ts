@@ -11,6 +11,7 @@ export const EventKind = {
   STEERING_INJECTED: "steering_injected",
   TURN_LIMIT: "turn_limit",
   LOOP_DETECTION: "loop_detection",
+  WARNING: "warning",
   ERROR: "error",
 } as const;
 

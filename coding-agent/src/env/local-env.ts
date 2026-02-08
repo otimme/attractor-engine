@@ -8,17 +8,20 @@ import type {
   DirEntry,
   GrepOptions,
 } from "../types/index.js";
-import { filterEnvironmentVariables } from "./env-filter.js";
+import { filterEnvironmentVariables, type EnvVarPolicy } from "./env-filter.js";
 
 export interface LocalEnvOptions {
   workingDir: string;
+  envVarPolicy?: EnvVarPolicy;
 }
 
 export class LocalExecutionEnvironment implements ExecutionEnvironment {
   private readonly workingDir: string;
+  private readonly envVarPolicy: EnvVarPolicy;
 
   constructor(options: LocalEnvOptions) {
     this.workingDir = options.workingDir;
+    this.envVarPolicy = options.envVarPolicy ?? "inherit_core_only";
   }
 
   private resolvePath(path: string): string {
@@ -98,7 +101,7 @@ export class LocalExecutionEnvironment implements ExecutionEnvironment {
     envVars?: Record<string, string>,
   ): Promise<ExecResult> {
     const cwd = workingDir ? this.resolvePath(workingDir) : this.workingDir;
-    const filteredEnv = filterEnvironmentVariables(process.env);
+    const filteredEnv = filterEnvironmentVariables(process.env, this.envVarPolicy);
     const env = envVars ? { ...filteredEnv, ...envVars } : filteredEnv;
 
     const startTime = Date.now();

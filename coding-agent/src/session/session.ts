@@ -12,6 +12,8 @@ import {
   responseText,
   responseToolCalls,
   responseReasoning,
+  StreamEventType,
+  StreamAccumulator,
 } from "unified-llm";
 import type {
   ProviderProfile,
@@ -22,9 +24,11 @@ import type {
   EnvironmentContextOptions,
 } from "../types/index.js";
 import { SessionState, EventKind, DEFAULT_SESSION_CONFIG } from "../types/index.js";
+import type { SubAgentHandle } from "../tools/subagent-tools.js";
 import { EventEmitter } from "../events/event-emitter.js";
 import { convertHistoryToMessages, countTurns } from "./history.js";
 import { truncateToolOutput } from "../tools/truncation.js";
+import { validateToolArgs } from "../tools/validate-args.js";
 import { detectLoop } from "./loop-detection.js";
 import { discoverProjectDocs } from "../profiles/system-prompt.js";
 
@@ -39,8 +43,9 @@ export class Session {
   private emitter: EventEmitter;
   private steeringQueue: string[];
   private followupQueue: string[];
+  subagents: Map<string, SubAgentHandle>;
   private abortController: AbortController;
-  private gitContext: { isGitRepo: boolean; branch?: string; gitRoot?: string } | null;
+  private gitContext: { isGitRepo: boolean; branch?: string; gitRoot?: string; modifiedCount?: number; untrackedCount?: number; recentCommits?: string[] } | null;
 
   constructor(options: {
     providerProfile: ProviderProfile;
@@ -58,6 +63,7 @@ export class Session {
     this.emitter = new EventEmitter();
     this.steeringQueue = [];
     this.followupQueue = [];
+    this.subagents = new Map();
     this.abortController = new AbortController();
     this.gitContext = null;
 
@@ -83,6 +89,10 @@ export class Session {
 
   async close(): Promise<void> {
     this.abortController.abort();
+    for (const [, agent] of this.subagents) {
+      await agent.close();
+    }
+    this.subagents.clear();
     this.emit(EventKind.SESSION_END);
     this.state = SessionState.CLOSED;
     this.emitter.close();
@@ -154,12 +164,16 @@ export class Session {
       const envOptions: EnvironmentContextOptions = {
         isGitRepo: this.gitContext?.isGitRepo,
         gitBranch: this.gitContext?.branch,
+        modifiedCount: this.gitContext?.modifiedCount,
+        untrackedCount: this.gitContext?.untrackedCount,
+        recentCommits: this.gitContext?.recentCommits,
         modelDisplayName: this.providerProfile.model,
       };
       const systemPrompt = this.providerProfile.buildSystemPrompt(
         this.executionEnv,
         projectDocs,
         envOptions,
+        this.config.userInstructions,
       );
 
       // e. Convert history to messages
@@ -186,10 +200,18 @@ export class Session {
         abortSignal: this.abortController.signal,
       };
 
-      // g. Call LLM
+      // g. Call LLM (streaming or non-streaming)
       let response: LLMResponse;
+      const useStreaming =
+        this.config.enableStreaming &&
+        this.providerProfile.supportsStreaming;
+
       try {
-        response = await this.llmClient.complete(request);
+        if (useStreaming) {
+          response = await this.callLLMStreaming(request);
+        } else {
+          response = await this.llmClient.complete(request);
+        }
       } catch (error: unknown) {
         const errorMessage =
           error instanceof Error ? error.message : String(error);
@@ -218,11 +240,14 @@ export class Session {
       // i2. Check context usage
       this.checkContextUsage();
 
-      // j. Emit
-      this.emit(EventKind.ASSISTANT_TEXT_END, {
-        text,
-        toolCallCount: toolCalls.length,
-      });
+      // j. Emit (non-streaming path emits ASSISTANT_TEXT_END here;
+      //    streaming path already emitted START/DELTA/END in callLLMStreaming)
+      if (!useStreaming) {
+        this.emit(EventKind.ASSISTANT_TEXT_END, {
+          text,
+          toolCallCount: toolCalls.length,
+        });
+      }
 
       // k. No tool calls → natural completion
       if (toolCalls.length === 0) {
@@ -277,7 +302,7 @@ export class Session {
     }
 
     // 9. Set state
-    this.state = SessionState.IDLE;
+    this.state = SessionState.AWAITING_INPUT;
 
     // 10. Emit SESSION_END
     this.emit(EventKind.SESSION_END);
@@ -326,6 +351,17 @@ export class Session {
         typeof toolCall.arguments === "string"
           ? (JSON.parse(toolCall.arguments) as Record<string, unknown>)
           : toolCall.arguments;
+
+      // a2. Validate arguments against schema
+      const validationError = validateToolArgs(args, tool.definition.parameters);
+      if (validationError !== null) {
+        const errorMsg = `Validation error for tool ${toolCall.name}: ${validationError}`;
+        this.emit(EventKind.TOOL_CALL_END, {
+          call_id: toolCall.id,
+          error: errorMsg,
+        });
+        return { toolCallId: toolCall.id, content: errorMsg, isError: true };
+      }
 
       // b. Pre-hook interceptor
       const interceptor = this.config.toolCallInterceptor;
@@ -379,6 +415,41 @@ export class Session {
     }
   }
 
+  private async callLLMStreaming(request: LLMRequest): Promise<LLMResponse> {
+    const accumulator = new StreamAccumulator(request.provider);
+    let emittedTextStart = false;
+
+    for await (const event of this.llmClient.stream(request)) {
+      accumulator.process(event);
+
+      switch (event.type) {
+        case StreamEventType.TEXT_DELTA: {
+          if (!emittedTextStart) {
+            this.emit(EventKind.ASSISTANT_TEXT_START);
+            emittedTextStart = true;
+          }
+          this.emit(EventKind.ASSISTANT_TEXT_DELTA, { delta: event.delta });
+          break;
+        }
+        case StreamEventType.ERROR: {
+          throw event.error;
+        }
+      }
+    }
+
+    const response = accumulator.response();
+    const fullText = responseText(response);
+
+    if (emittedTextStart) {
+      this.emit(EventKind.ASSISTANT_TEXT_END, {
+        text: fullText,
+        toolCallCount: responseToolCalls(response).length,
+      });
+    }
+
+    return response;
+  }
+
   private drainSteering(): void {
     while (this.steeringQueue.length > 0) {
       const msg = this.steeringQueue.shift();
@@ -409,7 +480,7 @@ export class Session {
     const estimatedTokens = totalChars / 4;
     const threshold = this.providerProfile.contextWindowSize * 0.8;
     if (estimatedTokens > threshold) {
-      this.emit(EventKind.ERROR, {
+      this.emit(EventKind.WARNING, {
         type: "context_warning",
         estimatedTokens,
         contextWindowSize: this.providerProfile.contextWindowSize,
@@ -422,6 +493,9 @@ export class Session {
     isGitRepo: boolean;
     branch?: string;
     gitRoot?: string;
+    modifiedCount?: number;
+    untrackedCount?: number;
+    recentCommits?: string[];
   }> {
     try {
       const check = await this.executionEnv.execCommand(
@@ -430,15 +504,33 @@ export class Session {
       );
       if (check.exitCode !== 0) return { isGitRepo: false };
 
-      const [branchResult, rootResult] = await Promise.all([
+      const [branchResult, rootResult, statusResult, logResult] = await Promise.all([
         this.executionEnv.execCommand("git branch --show-current", 5_000),
         this.executionEnv.execCommand("git rev-parse --show-toplevel", 5_000),
+        this.executionEnv.execCommand("git status --porcelain", 5_000),
+        this.executionEnv.execCommand("git log --oneline -10", 5_000),
       ]);
+
+      let modifiedCount: number | undefined;
+      let untrackedCount: number | undefined;
+      if (statusResult.exitCode === 0) {
+        const statusLines = statusResult.stdout.trim().split("\n").filter(Boolean);
+        modifiedCount = statusLines.filter((l) => !l.startsWith("??")).length;
+        untrackedCount = statusLines.filter((l) => l.startsWith("??")).length;
+      }
+
+      let recentCommits: string[] | undefined;
+      if (logResult.exitCode === 0 && logResult.stdout.trim()) {
+        recentCommits = logResult.stdout.trim().split("\n").filter(Boolean);
+      }
 
       return {
         isGitRepo: true,
         branch: branchResult.exitCode === 0 ? branchResult.stdout.trim() || undefined : undefined,
         gitRoot: rootResult.exitCode === 0 ? rootResult.stdout.trim() || undefined : undefined,
+        modifiedCount,
+        untrackedCount,
+        recentCommits,
       };
     } catch {
       return { isGitRepo: false };

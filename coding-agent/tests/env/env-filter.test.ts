@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { filterEnvironmentVariables } from "../../src/env/env-filter.js";
+import { filterEnvironmentVariables, type EnvVarPolicy } from "../../src/env/env-filter.js";
 
 describe("filterEnvironmentVariables", () => {
   test("includes normal variables", () => {
@@ -121,5 +121,123 @@ describe("filterEnvironmentVariables", () => {
       expect(val).toBeDefined();
       expect(typeof val).toBe("string");
     }
+  });
+});
+
+describe("filterEnvironmentVariables with inherit_all policy", () => {
+  const policy: EnvVarPolicy = "inherit_all";
+
+  test("includes sensitive vars without filtering", () => {
+    const result = filterEnvironmentVariables(
+      {
+        OPENAI_API_KEY: "sk-secret",
+        AWS_SECRET_ACCESS_KEY: "aws-key",
+        DATABASE_URL: "postgres://...",
+        HOME: "/home/user",
+        MY_CUSTOM: "value",
+      },
+      policy,
+    );
+
+    expect(result["OPENAI_API_KEY"]).toBe("sk-secret");
+    expect(result["AWS_SECRET_ACCESS_KEY"]).toBe("aws-key");
+    expect(result["DATABASE_URL"]).toBe("postgres://...");
+    expect(result["HOME"]).toBe("/home/user");
+    expect(result["MY_CUSTOM"]).toBe("value");
+  });
+
+  test("skips undefined values", () => {
+    const result = filterEnvironmentVariables(
+      { DEFINED: "yes", UNDEF: undefined },
+      policy,
+    );
+
+    expect(result["DEFINED"]).toBe("yes");
+    expect("UNDEF" in result).toBe(false);
+  });
+});
+
+describe("filterEnvironmentVariables with inherit_none policy", () => {
+  const policy: EnvVarPolicy = "inherit_none";
+
+  test("includes only ALWAYS_INCLUDE vars", () => {
+    const result = filterEnvironmentVariables(
+      {
+        PATH: "/usr/bin",
+        HOME: "/home/user",
+        MY_CUSTOM: "value",
+        EDITOR: "vim",
+      },
+      policy,
+    );
+
+    expect(result["PATH"]).toBe("/usr/bin");
+    expect(result["HOME"]).toBe("/home/user");
+    expect(result["EDITOR"]).toBe("vim");
+    expect(result["MY_CUSTOM"]).toBeUndefined();
+  });
+
+  test("excludes sensitive vars even if they exist", () => {
+    const result = filterEnvironmentVariables(
+      {
+        OPENAI_API_KEY: "sk-secret",
+        DATABASE_URL: "postgres://...",
+        PATH: "/usr/bin",
+      },
+      policy,
+    );
+
+    expect(result["OPENAI_API_KEY"]).toBeUndefined();
+    expect(result["DATABASE_URL"]).toBeUndefined();
+    expect(result["PATH"]).toBe("/usr/bin");
+  });
+
+  test("excludes non-sensitive custom vars", () => {
+    const result = filterEnvironmentVariables(
+      {
+        CUSTOM_VAR: "hello",
+        ANOTHER: "world",
+        NODE_PATH: "/usr/lib/node",
+      },
+      policy,
+    );
+
+    expect(result["CUSTOM_VAR"]).toBeUndefined();
+    expect(result["ANOTHER"]).toBeUndefined();
+    expect(result["NODE_PATH"]).toBe("/usr/lib/node");
+  });
+});
+
+describe("filterEnvironmentVariables with inherit_core_only policy", () => {
+  const policy: EnvVarPolicy = "inherit_core_only";
+
+  test("filters sensitive vars and includes safe ones (same as default)", () => {
+    const result = filterEnvironmentVariables(
+      {
+        PATH: "/usr/bin",
+        HOME: "/home/user",
+        OPENAI_API_KEY: "sk-secret",
+        MY_CUSTOM: "value",
+      },
+      policy,
+    );
+
+    expect(result["PATH"]).toBe("/usr/bin");
+    expect(result["HOME"]).toBe("/home/user");
+    expect(result["OPENAI_API_KEY"]).toBeUndefined();
+    expect(result["MY_CUSTOM"]).toBe("value");
+  });
+
+  test("matches default behavior when no policy is specified", () => {
+    const env = {
+      PATH: "/usr/bin",
+      OPENAI_API_KEY: "sk-secret",
+      MY_VAR: "hello",
+    };
+
+    const withPolicy = filterEnvironmentVariables(env, policy);
+    const withDefault = filterEnvironmentVariables(env);
+
+    expect(withPolicy).toEqual(withDefault);
   });
 });

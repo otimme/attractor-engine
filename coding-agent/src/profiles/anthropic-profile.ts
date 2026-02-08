@@ -56,6 +56,7 @@ export function createAnthropicProfile(
       environment: ExecutionEnvironment,
       projectDocs: string,
       envOptions?: EnvironmentContextOptions,
+      userInstructions?: string,
     ): string {
       const envContext = buildEnvironmentContext(environment, envOptions);
       const toolDescs = registry
@@ -67,6 +68,7 @@ export function createAnthropicProfile(
         envContext,
         toolDescs,
         projectDocs,
+        userInstructions,
       );
     },
 
@@ -75,7 +77,14 @@ export function createAnthropicProfile(
     },
 
     providerOptions(): Record<string, Record<string, unknown>> | null {
-      return null;
+      return {
+        anthropic: {
+          betaHeaders: [
+            "interleaved-thinking-2025-05-14",
+            "output-128k-2025-02-19",
+          ],
+        },
+      };
     },
 
     supportsReasoning: true,

@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { StubAdapter } from "unified-llm/tests/stubs/stub-adapter.js";
-import { Client, Role } from "unified-llm";
-import type { Response as LLMResponse, ToolCallData } from "unified-llm";
+import { Client, Role, StreamEventType } from "unified-llm";
+import type { Response as LLMResponse, ToolCallData, StreamEvent } from "unified-llm";
 import { Session } from "../../src/session/session.js";
 import { createAnthropicProfile } from "../../src/profiles/anthropic-profile.js";
 import { StubExecutionEnvironment } from "../stubs/stub-env.js";
@@ -88,7 +88,7 @@ describe("Session", () => {
 
     await session.submit("Hi");
 
-    expect(session.state).toBe(SessionState.IDLE);
+    expect(session.state).toBe(SessionState.AWAITING_INPUT);
     expect(session.history).toHaveLength(2);
     expect(session.history[0]?.kind).toBe("user");
     expect(session.history[1]?.kind).toBe("assistant");
@@ -116,7 +116,7 @@ describe("Session", () => {
 
     await session.submit("Read foo.ts");
 
-    expect(session.state).toBe(SessionState.IDLE);
+    expect(session.state).toBe(SessionState.AWAITING_INPUT);
     expect(session.history).toHaveLength(4);
     expect(session.history[0]?.kind).toBe("user");
     expect(session.history[1]?.kind).toBe("assistant");
@@ -597,6 +597,52 @@ describe("Session", () => {
     expect(request?.abortSignal).toBeInstanceOf(AbortSignal);
   });
 
+  test("validation error returned when required field missing", async () => {
+    const { session } = createTestSession([
+      makeToolCallResponse([
+        {
+          id: "tc1",
+          name: "read_file",
+          arguments: {}, // missing required file_path
+        },
+      ]),
+      makeTextResponse("I see the validation error"),
+    ]);
+
+    await session.submit("read a file");
+
+    const toolResults = session.history.find((t) => t.kind === "tool_results");
+    expect(toolResults).toBeDefined();
+    if (toolResults?.kind === "tool_results") {
+      expect(toolResults.results[0]?.isError).toBe(true);
+      expect(toolResults.results[0]?.content).toContain("Validation error for tool read_file");
+      expect(toolResults.results[0]?.content).toContain('missing required field "file_path"');
+    }
+  });
+
+  test("validation error returned when field has wrong type", async () => {
+    const { session } = createTestSession([
+      makeToolCallResponse([
+        {
+          id: "tc1",
+          name: "read_file",
+          arguments: { file_path: 123 }, // should be string
+        },
+      ]),
+      makeTextResponse("I see the type error"),
+    ]);
+
+    await session.submit("read with bad args");
+
+    const toolResults = session.history.find((t) => t.kind === "tool_results");
+    expect(toolResults).toBeDefined();
+    if (toolResults?.kind === "tool_results") {
+      expect(toolResults.results[0]?.isError).toBe(true);
+      expect(toolResults.results[0]?.content).toContain("Validation error for tool read_file");
+      expect(toolResults.results[0]?.content).toContain('expected "file_path" to be string');
+    }
+  });
+
   test("context window warning emitted when usage exceeds 80%", async () => {
     // contextWindowSize for anthropic profile is 200_000 tokens
     // 80% threshold = 160_000 tokens
@@ -611,9 +657,69 @@ describe("Session", () => {
 
     const events = await eventsPromise;
     const contextWarning = events.find(
-      (e) => e.kind === EventKind.ERROR && e.data.type === "context_warning",
+      (e) => e.kind === EventKind.WARNING && e.data.type === "context_warning",
     );
     expect(contextWarning).toBeDefined();
     expect(contextWarning?.data.estimatedTokens).toBeGreaterThan(160_000);
+  });
+
+  test("streaming emits ASSISTANT_TEXT_START, DELTA, and END events", async () => {
+    const streamEvents: StreamEvent[] = [
+      { type: StreamEventType.STREAM_START, id: "resp-stream", model: "test-model" },
+      { type: StreamEventType.TEXT_START },
+      { type: StreamEventType.TEXT_DELTA, delta: "Hello " },
+      { type: StreamEventType.TEXT_DELTA, delta: "world" },
+      { type: StreamEventType.TEXT_END },
+      { type: StreamEventType.FINISH, finishReason: { reason: "stop" }, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 } },
+    ];
+
+    const adapter = new StubAdapter(
+      "anthropic",
+      [{ events: streamEvents }],
+    );
+    const client = new Client({ providers: { anthropic: adapter } });
+    const profile = createAnthropicProfile("test-model");
+    const env = new StubExecutionEnvironment();
+    const session = new Session({
+      providerProfile: profile,
+      executionEnv: env,
+      llmClient: client,
+      config: { enableStreaming: true },
+    });
+
+    const eventsPromise = collectEvents(session, EventKind.SESSION_END);
+    await session.submit("Hi");
+
+    const events = await eventsPromise;
+    const kinds = events.map((e) => e.kind);
+
+    expect(kinds).toContain(EventKind.ASSISTANT_TEXT_START);
+    expect(kinds).toContain(EventKind.ASSISTANT_TEXT_DELTA);
+    expect(kinds).toContain(EventKind.ASSISTANT_TEXT_END);
+
+    const deltas = events.filter((e) => e.kind === EventKind.ASSISTANT_TEXT_DELTA);
+    expect(deltas).toHaveLength(2);
+    expect(deltas[0]?.data["delta"]).toBe("Hello ");
+    expect(deltas[1]?.data["delta"]).toBe("world");
+
+    const endEvent = events.find((e) => e.kind === EventKind.ASSISTANT_TEXT_END);
+    expect(endEvent?.data["text"]).toBe("Hello world");
+  });
+
+  test("streaming disabled falls back to complete()", async () => {
+    const { session } = createTestSession([makeTextResponse("no stream")], {
+      config: { enableStreaming: false },
+    });
+
+    const eventsPromise = collectEvents(session, EventKind.SESSION_END);
+    await session.submit("Hi");
+
+    const events = await eventsPromise;
+    const kinds = events.map((e) => e.kind);
+
+    // Non-streaming path does NOT emit ASSISTANT_TEXT_START or ASSISTANT_TEXT_DELTA
+    expect(kinds).not.toContain(EventKind.ASSISTANT_TEXT_START);
+    expect(kinds).not.toContain(EventKind.ASSISTANT_TEXT_DELTA);
+    expect(kinds).toContain(EventKind.ASSISTANT_TEXT_END);
   });
 });

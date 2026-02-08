@@ -5,6 +5,9 @@ import type { ExecutionEnvironment } from "./execution-env.js";
 export interface EnvironmentContextOptions {
   isGitRepo?: boolean;
   gitBranch?: string;
+  modifiedCount?: number;
+  untrackedCount?: number;
+  recentCommits?: string[];
   modelDisplayName?: string;
   knowledgeCutoff?: string;
 }
@@ -17,6 +20,7 @@ export interface ProviderProfile {
     environment: ExecutionEnvironment,
     projectDocs: string,
     envOptions?: EnvironmentContextOptions,
+    userInstructions?: string,
   ): string;
   tools(): ToolDefinition[];
   providerOptions(): Record<string, Record<string, unknown>> | null;

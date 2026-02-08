@@ -1,5 +1,13 @@
 import type { RegisteredTool, ExecutionEnvironment } from "../types/index.js";
 
+/**
+ * Collapse runs of whitespace to a single space and trim trailing whitespace.
+ * Used for fuzzy matching when exact hunk match fails.
+ */
+export function normalizeWhitespace(line: string): string {
+  return line.replace(/[ \t]+/g, " ").replace(/\s+$/, "");
+}
+
 export interface PatchOperation {
   kind: "add" | "delete" | "update";
   path: string;
@@ -77,6 +85,10 @@ export function parsePatch(patch: string): PatchOperation[] {
           const hunkLines: HunkLine[] = [];
           while (i < lines.length) {
             const hunkLine = lines[i] ?? "";
+            if (hunkLine === "*** End of File") {
+              i++;
+              continue;
+            }
             if (hunkLine.startsWith("@@ ") || hunkLine.startsWith("*** ")) break;
             if (hunkLine.startsWith("+")) {
               hunkLines.push({ kind: "add", content: hunkLine.slice(1) });
@@ -150,9 +162,27 @@ export function applyHunks(content: string, hunks: Hunk[]): string {
       }
     }
 
+    // Fuzzy match fallback: normalize whitespace and retry
+    if (matchStart === -1) {
+      const normalizedSearch = searchLines.map(normalizeWhitespace);
+      for (let j = offset; j <= fileLines.length - searchLines.length; j++) {
+        let matches = true;
+        for (let k = 0; k < normalizedSearch.length; k++) {
+          if (normalizeWhitespace(fileLines[j + k] ?? "") !== normalizedSearch[k]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) {
+          matchStart = j;
+          break;
+        }
+      }
+    }
+
     if (matchStart === -1) {
       throw new Error(
-        `Could not find hunk location for context hint: "${hunk.contextHint}"`,
+        `Could not find hunk location even after fuzzy matching for context hint: "${hunk.contextHint}"`,
       );
     }
 
@@ -177,6 +207,13 @@ export function applyHunks(content: string, hunks: Hunk[]): string {
   return fileLines.join("\n");
 }
 
+/**
+ * Escape a path for safe use inside single-quoted shell arguments.
+ */
+function shellEscapePath(path: string): string {
+  return `'${path.replace(/'/g, "'\\''")}'`;
+}
+
 export async function applyPatch(
   patch: string,
   env: ExecutionEnvironment,
@@ -196,7 +233,7 @@ export async function applyPatch(
         if (!exists) {
           throw new Error(`Cannot delete non-existent file: ${op.path}`);
         }
-        await env.execCommand(`rm ${op.path}`, 5000);
+        await env.execCommand(`rm -- ${shellEscapePath(op.path)}`, 5000);
         summaries.push(`Deleted ${op.path}`);
         break;
       }
@@ -207,7 +244,7 @@ export async function applyPatch(
 
         if (op.newPath !== undefined) {
           await env.writeFile(op.newPath, updated);
-          await env.execCommand(`rm ${op.path}`, 5000);
+          await env.execCommand(`rm -- ${shellEscapePath(op.path)}`, 5000);
           summaries.push(`Updated and moved ${op.path} -> ${op.newPath}`);
         } else {
           await env.writeFile(op.path, updated);

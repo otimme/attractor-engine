@@ -44,6 +44,12 @@ describe("createAnthropicProfile", () => {
     expect(prompt).toContain("Custom project rules");
   });
 
+  test("system prompt includes user instructions as layer 5", () => {
+    const env = new StubExecutionEnvironment();
+    const prompt = profile.buildSystemPrompt(env, "", undefined, "Always use semicolons");
+    expect(prompt).toContain("Always use semicolons");
+  });
+
   test("tools() returns definitions matching registry", () => {
     const defs = profile.tools();
     expect(defs.length).toBe(6);
@@ -52,8 +58,13 @@ describe("createAnthropicProfile", () => {
     expect(names).toContain("edit_file");
   });
 
-  test("providerOptions returns null", () => {
-    expect(profile.providerOptions()).toBeNull();
+  test("providerOptions returns anthropic beta headers", () => {
+    const options = profile.providerOptions();
+    expect(options).not.toBeNull();
+    const headers = options?.anthropic?.betaHeaders;
+    expect(Array.isArray(headers)).toBe(true);
+    expect(headers).toContain("interleaved-thinking-2025-05-14");
+    expect(headers).toContain("output-128k-2025-02-19");
   });
 
   test("has correct capability flags", () => {
