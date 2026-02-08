@@ -2,11 +2,13 @@ import type { Request } from "../../types/request.js";
 import type { ContentPart } from "../../types/content-part.js";
 import type { ToolDefinition, ToolChoice } from "../../types/tool.js";
 import type { Message } from "../../types/message.js";
+import type { Warning } from "../../types/response.js";
 import { Role } from "../../types/role.js";
 
 interface TranslatedRequest {
   body: Record<string, unknown>;
   toolCallIdMap: Map<string, string>;
+  warnings: Warning[];
 }
 
 function translateContentPart(
@@ -135,6 +137,7 @@ function buildToolCallIdMap(messages: Message[]): Map<string, string> {
 
 export function translateRequest(request: Request): TranslatedRequest {
   const toolCallIdMap = buildToolCallIdMap(request.messages);
+  const warnings: Warning[] = [];
 
   const systemParts: Record<string, unknown>[] = [];
   const contents: Record<string, unknown>[] = [];
@@ -151,9 +154,26 @@ export function translateRequest(request: Request): TranslatedRequest {
 
     const parts: Record<string, unknown>[] = [];
     for (const part of message.content) {
+      if (part.kind === "audio") {
+        warnings.push({ message: "Audio content parts are not supported by Gemini and were dropped" });
+        continue;
+      }
+      if (part.kind === "document") {
+        warnings.push({ message: "Document content parts are not supported by Gemini and were dropped" });
+        continue;
+      }
       const translated = translateContentPart(part, toolCallIdMap);
       if (translated) {
         parts.push(translated);
+      }
+      if (part.kind === "tool_result" && part.toolResult.imageData) {
+        const base64 = btoa(String.fromCharCode(...part.toolResult.imageData));
+        parts.push({
+          inlineData: {
+            mimeType: part.toolResult.imageMediaType ?? "image/png",
+            data: base64,
+          },
+        });
       }
     }
 
@@ -232,5 +252,5 @@ export function translateRequest(request: Request): TranslatedRequest {
     }
   }
 
-  return { body, toolCallIdMap };
+  return { body, toolCallIdMap, warnings };
 }

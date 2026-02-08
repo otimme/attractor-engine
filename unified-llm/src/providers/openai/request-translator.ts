@@ -1,9 +1,12 @@
 import type { Request } from "../../types/request.js";
 import type { Message } from "../../types/message.js";
 import type { ContentPart } from "../../types/content-part.js";
+import type { Warning } from "../../types/response.js";
 import {
   isTextPart,
   isImagePart,
+  isAudioPart,
+  isDocumentPart,
   isToolCallPart,
   isToolResultPart,
   isThinkingPart,
@@ -22,9 +25,14 @@ function encodeImageToDataUri(
   return `data:${mime};base64,${base64}`;
 }
 
-function translateContentPartToInput(part: ContentPart): Record<string, unknown> | undefined {
+interface TranslatePartResult {
+  translated: Record<string, unknown> | undefined;
+  warning?: Warning;
+}
+
+function translateContentPartToInput(part: ContentPart): TranslatePartResult {
   if (isTextPart(part)) {
-    return { type: "input_text", text: part.text };
+    return { translated: { type: "input_text", text: part.text } };
   }
   if (isImagePart(part)) {
     const result: Record<string, unknown> = { type: "input_image" };
@@ -33,14 +41,26 @@ function translateContentPartToInput(part: ContentPart): Record<string, unknown>
     } else if (part.image.url) {
       result.image_url = part.image.url;
     } else {
-      return undefined;
+      return { translated: undefined };
     }
     if (part.image.detail) {
       result.detail = part.image.detail;
     }
-    return result;
+    return { translated: result };
   }
-  return undefined;
+  if (isAudioPart(part)) {
+    return {
+      translated: undefined,
+      warning: { message: "Audio content parts are not supported by the OpenAI provider and were dropped", code: "unsupported_part" },
+    };
+  }
+  if (isDocumentPart(part)) {
+    return {
+      translated: undefined,
+      warning: { message: "Document content parts are not supported by the OpenAI provider and were dropped", code: "unsupported_part" },
+    };
+  }
+  return { translated: undefined };
 }
 
 function translateAssistantContentPart(part: ContentPart): Record<string, unknown> | undefined {
@@ -54,13 +74,14 @@ function translateAssistantContentPart(part: ContentPart): Record<string, unknow
   return undefined;
 }
 
-function translateMessage(message: Message): Array<Record<string, unknown>> {
+function translateMessage(message: Message, warnings: Warning[]): Array<Record<string, unknown>> {
   const items: Array<Record<string, unknown>> = [];
 
   if (message.role === Role.USER) {
     const content: Array<Record<string, unknown>> = [];
     for (const part of message.content) {
-      const translated = translateContentPartToInput(part);
+      const { translated, warning } = translateContentPartToInput(part);
+      if (warning) warnings.push(warning);
       if (translated) {
         content.push(translated);
       }
@@ -155,6 +176,11 @@ function enforceStrictSchema(
           ? enforceStrictSchema({ ...prop })
           : { ...prop };
 
+        // Recurse into array items that are objects
+        if (isRecord(enforced.items) && isRecord(enforced.items.properties)) {
+          enforced.items = enforceStrictSchema({ ...enforced.items });
+        }
+
         if (missing.includes(key)) {
           const propType = enforced.type;
           enforced.type = Array.isArray(propType)
@@ -168,6 +194,11 @@ function enforceStrictSchema(
     }
     result.properties = newProps;
     result.required = allKeys;
+  }
+
+  // Also recurse into top-level items (for array schemas)
+  if (isRecord(result.items) && isRecord(result.items.properties)) {
+    result.items = enforceStrictSchema({ ...result.items });
   }
 
   return result;
@@ -194,11 +225,12 @@ function translateToolChoice(
 export function translateRequest(
   request: Request,
   streaming: boolean,
-): { body: Record<string, unknown>; headers: Record<string, string> } {
+): { body: Record<string, unknown>; headers: Record<string, string>; warnings: Warning[] } {
   const body: Record<string, unknown> = {
     model: request.model,
     stream: streaming,
   };
+  const warnings: Warning[] = [];
 
   // Extract system/developer messages into instructions
   const instructionTexts: string[] = [];
@@ -212,7 +244,7 @@ export function translateRequest(
         }
       }
     } else {
-      const translated = translateMessage(message);
+      const translated = translateMessage(message, warnings);
       for (const item of translated) {
         inputItems.push(item);
       }
@@ -296,5 +328,5 @@ export function translateRequest(
     }
   }
 
-  return { body, headers: {} };
+  return { body, headers: {}, warnings };
 }

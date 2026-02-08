@@ -86,6 +86,19 @@ describe("truncateLines", () => {
     expect(result).toContain("[... 14 lines omitted ...]");
   });
 
+  test("odd maxLines keeps exactly maxLines lines (head=2, tail=3)", () => {
+    const lines = Array.from({ length: 10 }, (_, i) => `line${i}`);
+    const input = lines.join("\n");
+    const result = truncateLines(input, 5);
+    expect(result).toContain("line0");
+    expect(result).toContain("line1");
+    expect(result).not.toContain("line2\n");
+    expect(result).toContain("line7");
+    expect(result).toContain("line8");
+    expect(result).toContain("line9");
+    expect(result).toContain("[... 5 lines omitted ...]");
+  });
+
   test("single line is never truncated", () => {
     const input = "just one line";
     const result = truncateLines(input, 1);

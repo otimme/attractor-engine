@@ -582,4 +582,107 @@ describe("Anthropic request translator", () => {
       data: "redacted-data",
     });
   });
+
+  test("accepts snake_case beta_headers provider option", () => {
+    const request: Request = {
+      model: "claude-opus-4-6",
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Hi" }] },
+      ],
+      providerOptions: {
+        anthropic: {
+          beta_headers: "prompt-caching-2024-07-31",
+        },
+      },
+    };
+
+    const { headers } = translateRequest(request);
+
+    expect(headers["anthropic-beta"]).toBe("prompt-caching-2024-07-31");
+  });
+
+  test("prefers snake_case beta_headers over camelCase", () => {
+    const request: Request = {
+      model: "claude-opus-4-6",
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Hi" }] },
+      ],
+      providerOptions: {
+        anthropic: {
+          beta_headers: "from-snake",
+          betaHeaders: "from-camel",
+        },
+      },
+    };
+
+    const { headers } = translateRequest(request);
+
+    expect(headers["anthropic-beta"]).toBe("from-snake");
+  });
+
+  test("excludes snake_case known keys from passthrough", () => {
+    const request: Request = {
+      model: "claude-opus-4-6",
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Hi" }] },
+      ],
+      providerOptions: {
+        anthropic: {
+          auto_cache: false,
+          beta_headers: "some-beta",
+          custom_field: "value",
+        },
+      },
+    };
+
+    const { body } = translateRequest(request);
+
+    expect(body.auto_cache).toBeUndefined();
+    expect(body.beta_headers).toBeUndefined();
+    expect(body.custom_field).toBe("value");
+  });
+
+  test("emits warning when audio content parts are dropped", () => {
+    const request: Request = {
+      model: "claude-opus-4-6",
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "text", text: "Listen to this" },
+            { kind: "audio", audio: { url: "https://example.com/audio.mp3" } },
+          ],
+        },
+      ],
+    };
+
+    const { warnings, body } = translateRequest(request);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.code).toBe("unsupported_part");
+    expect(warnings[0]?.message).toContain("Audio");
+    // Text part should still be translated
+    const messages = body.messages as Array<{ content: unknown[] }>;
+    expect(messages[0]?.content).toHaveLength(1);
+  });
+
+  test("emits warning when document content parts are dropped", () => {
+    const request: Request = {
+      model: "claude-opus-4-6",
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "document", document: { url: "https://example.com/doc.pdf" } },
+          ],
+        },
+      ],
+    };
+
+    const { warnings } = translateRequest(request);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.code).toBe("unsupported_part");
+    expect(warnings[0]?.message).toContain("Document");
+  });
 });

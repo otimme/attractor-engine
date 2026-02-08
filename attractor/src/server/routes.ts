@@ -12,6 +12,7 @@ export interface PipelineRecord {
   id: string;
   status: "running" | "completed" | "failed" | "cancelled";
   result: PipelineResult | undefined;
+  dotSource: string;
   emitter: PipelineEventEmitter;
   interviewer: WebInterviewer;
   abortController: AbortController;
@@ -75,6 +76,7 @@ async function handlePostPipeline(
     id,
     status: "running",
     result: undefined,
+    dotSource: dotContent,
     emitter,
     interviewer,
     abortController,
@@ -227,6 +229,22 @@ async function handlePostAnswer(
   return jsonResponse({ submitted: true });
 }
 
+/** GET /pipelines/:id/graph — get graph DOT source */
+function handleGetGraph(
+  pipelineId: string,
+  ctx: RouteContext,
+): Response {
+  const record = ctx.pipelines.get(pipelineId);
+  if (!record) {
+    return errorResponse("Pipeline not found", 404);
+  }
+
+  return new Response(record.dotSource, {
+    status: 200,
+    headers: { "Content-Type": "text/vnd.graphviz" },
+  });
+}
+
 /** GET /pipelines/:id/context — get pipeline context */
 function handleGetContext(
   pipelineId: string,
@@ -287,6 +305,11 @@ export async function handleRequest(
   // GET /pipelines/:id
   if (method === "GET" && url.pathname === `/pipelines/${pipelineId}`) {
     return handleGetPipeline(pipelineId, ctx);
+  }
+
+  // GET /pipelines/:id/graph
+  if (method === "GET" && url.pathname === `/pipelines/${pipelineId}/graph`) {
+    return handleGetGraph(pipelineId, ctx);
   }
 
   // GET /pipelines/:id/events

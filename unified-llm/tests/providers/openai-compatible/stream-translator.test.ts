@@ -336,6 +336,64 @@ describe("OpenAI-Compatible Stream Translator", () => {
     }
   });
 
+  test("emits PROVIDER_EVENT for non-message SSE events", async () => {
+    const sseEvents: SSEEvent[] = [
+      { event: "custom_event", data: "custom payload" },
+      {
+        event: "message",
+        data: JSON.stringify({
+          id: "chatcmpl-prov",
+          model: "llama-3-70b",
+          choices: [
+            { index: 0, delta: { content: "Hi" }, finish_reason: "stop" },
+          ],
+        }),
+      },
+      { event: "message", data: "[DONE]" },
+    ];
+
+    const events = await collectEvents(
+      translateStream(makeSSEStream(sseEvents)),
+    );
+
+    expect(events[0]?.type).toBe(StreamEventType.PROVIDER_EVENT);
+    if (events[0]?.type === StreamEventType.PROVIDER_EVENT) {
+      expect(events[0].eventType).toBe("custom_event");
+      expect(events[0].raw).toBe("custom payload");
+    }
+  });
+
+  test("includes raw usage data in FINISH event", async () => {
+    const usageData = {
+      prompt_tokens: 5,
+      completion_tokens: 10,
+      total_tokens: 15,
+    };
+    const sseEvents: SSEEvent[] = [
+      {
+        event: "message",
+        data: JSON.stringify({
+          id: "chatcmpl-raw",
+          model: "llama-3-70b",
+          choices: [
+            { index: 0, delta: { content: "Hi" }, finish_reason: "stop" },
+          ],
+          usage: usageData,
+        }),
+      },
+      { event: "message", data: "[DONE]" },
+    ];
+
+    const events = await collectEvents(
+      translateStream(makeSSEStream(sseEvents)),
+    );
+
+    const finish = events.find((e) => e.type === StreamEventType.FINISH);
+    if (finish?.type === StreamEventType.FINISH) {
+      expect(finish.usage?.raw).toEqual(usageData);
+    }
+  });
+
   test("complete stream lifecycle with text and tool calls", async () => {
     const sseEvents: SSEEvent[] = [
       {

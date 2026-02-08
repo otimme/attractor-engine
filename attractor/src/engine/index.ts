@@ -2,6 +2,7 @@ export { selectEdge, bestByWeightThenLexical } from "./edge-selection.js";
 export { resolveFidelity, resolveThreadId, buildPreamble } from "./fidelity.js";
 export type { FidelityResolution } from "./fidelity.js";
 export { executeWithRetry, buildRetryPolicy } from "./retry.js";
+export type { RetryResult } from "./retry.js";
 export { checkGoalGates, getRetryTarget } from "./goal-gates.js";
 export type { GoalGateResult } from "./goal-gates.js";
 export { saveCheckpoint, loadCheckpoint } from "./checkpoint.js";

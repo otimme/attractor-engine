@@ -5,7 +5,7 @@ import { setDefaultClient } from "../../src/client/default-client.js";
 import { StubAdapter } from "../stubs/stub-adapter.js";
 import type { Response } from "../../src/types/response.js";
 import { Role } from "../../src/types/role.js";
-import { ConfigurationError, RequestTimeoutError } from "../../src/types/errors.js";
+import { ConfigurationError, RequestTimeoutError, UnsupportedToolChoiceError } from "../../src/types/errors.js";
 
 function makeResponse(
   text: string,
@@ -513,6 +513,189 @@ describe("generate", () => {
 
     expect(result.text).toBe("success");
     expect(retryCalled).toBe(false);
+  });
+
+  test("rejects tool parameters without root type object", async () => {
+    const adapter = new StubAdapter("stub", []);
+    setup(adapter);
+
+    await expect(
+      generate({
+        model: "test-model",
+        prompt: "hello",
+        tools: [
+          {
+            name: "bad_tool",
+            description: "Bad params",
+            parameters: { type: "array", items: { type: "string" } },
+          },
+        ],
+        client,
+      }),
+    ).rejects.toThrow(ConfigurationError);
+  });
+
+  test("allows empty tool parameters (no root type check)", async () => {
+    const adapter = new StubAdapter("stub", [
+      { response: makeResponse("ok") },
+    ]);
+    setup(adapter);
+
+    const result = await generate({
+      model: "test-model",
+      prompt: "hello",
+      tools: [
+        {
+          name: "empty_tool",
+          description: "Empty params",
+          parameters: {},
+          execute: async () => "done",
+        },
+      ],
+      client,
+    });
+
+    expect(result.text).toBe("ok");
+  });
+
+  test("throws UnsupportedToolChoiceError when adapter rejects mode", async () => {
+    const adapter = new StubAdapter("stub", []);
+    adapter.supportsToolChoice = (mode: string) => mode !== "required";
+    setup(adapter);
+
+    await expect(
+      generate({
+        model: "test-model",
+        prompt: "hello",
+        tools: [
+          {
+            name: "my_tool",
+            description: "A tool",
+            parameters: { type: "object" },
+          },
+        ],
+        toolChoice: { mode: "required" },
+        client,
+      }),
+    ).rejects.toThrow(UnsupportedToolChoiceError);
+  });
+
+  test("allows toolChoice when adapter supports the mode", async () => {
+    const adapter = new StubAdapter("stub", [
+      { response: makeResponse("ok") },
+    ]);
+    adapter.supportsToolChoice = () => true;
+    setup(adapter);
+
+    const result = await generate({
+      model: "test-model",
+      prompt: "hello",
+      tools: [
+        {
+          name: "my_tool",
+          description: "A tool",
+          parameters: { type: "object" },
+        },
+      ],
+      toolChoice: { mode: "auto" },
+      client,
+    });
+
+    expect(result.text).toBe("ok");
+  });
+
+  test("allows toolChoice when adapter has no supportsToolChoice method", async () => {
+    const adapter = new StubAdapter("stub", [
+      { response: makeResponse("ok") },
+    ]);
+    setup(adapter);
+
+    const result = await generate({
+      model: "test-model",
+      prompt: "hello",
+      tools: [
+        {
+          name: "my_tool",
+          description: "A tool",
+          parameters: { type: "object" },
+        },
+      ],
+      toolChoice: { mode: "auto" },
+      client,
+    });
+
+    expect(result.text).toBe("ok");
+  });
+
+  test("abortSignal is passed to adapter request", async () => {
+    const adapter = new StubAdapter("stub", [
+      { response: makeResponse("ok") },
+    ]);
+    setup(adapter);
+
+    const controller = new AbortController();
+    await generate({
+      model: "test-model",
+      prompt: "hello",
+      abortSignal: controller.signal,
+      client,
+    });
+
+    expect(adapter.calls[0]?.abortSignal).toBe(controller.signal);
+  });
+
+  test("abortSignal is passed to tool execution context", async () => {
+    const adapter = new StubAdapter("stub", [
+      {
+        response: makeResponse("", "tool_calls", [
+          { id: "tc-1", name: "sig_tool", arguments: {} },
+        ]),
+      },
+      {
+        response: makeResponse("done"),
+      },
+    ]);
+    setup(adapter);
+
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+
+    await generate({
+      model: "test-model",
+      prompt: "use tool",
+      tools: [
+        {
+          name: "sig_tool",
+          description: "Receives signal",
+          parameters: {},
+          execute: async (_args, context) => {
+            receivedSignal = context?.abortSignal;
+            return "ok";
+          },
+        },
+      ],
+      abortSignal: controller.signal,
+      client,
+    });
+
+    expect(receivedSignal).toBe(controller.signal);
+  });
+
+  test("pre-aborted signal rejects generate", async () => {
+    const adapter = new StubAdapter("stub", []);
+    setup(adapter);
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      generate({
+        model: "test-model",
+        prompt: "hello",
+        abortSignal: controller.signal,
+        client,
+      }),
+    ).rejects.toThrow();
   });
 
   test("total timeout throws RequestTimeoutError", async () => {

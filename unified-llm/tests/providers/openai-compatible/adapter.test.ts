@@ -287,6 +287,21 @@ describe("OpenAICompatibleAdapter", () => {
     }
   });
 
+  test("supportsNativeJsonSchema defaults to false", () => {
+    const adapter = new OpenAICompatibleAdapter({
+      baseUrl: "http://localhost:9999",
+    });
+    expect(adapter.supportsNativeJsonSchema).toBe(false);
+  });
+
+  test("supportsNativeJsonSchema can be set to true", () => {
+    const adapter = new OpenAICompatibleAdapter({
+      baseUrl: "http://localhost:9999",
+      supportsNativeJsonSchema: true,
+    });
+    expect(adapter.supportsNativeJsonSchema).toBe(true);
+  });
+
   test("request.timeout overrides adapter timeout", async () => {
     const server = Bun.serve({
       port: 0,
@@ -312,14 +327,14 @@ describe("OpenAICompatibleAdapter", () => {
     try {
       const adapter = new OpenAICompatibleAdapter({
         baseUrl: `http://localhost:${server.port}`,
-        timeout: { connect: 1, request: 1, streamRead: 1 },
+        timeout: { request: 1, streamRead: 1 },
       });
 
       // Using a longer request timeout should allow the request to succeed
       const response = await adapter.complete({
         model: "test-model",
         messages: [],
-        timeout: { connect: 5000, request: 5000, streamRead: 5000 },
+        timeout: { request: 5000, streamRead: 5000 },
       });
 
       expect(response.provider).toBe("openai-compatible");

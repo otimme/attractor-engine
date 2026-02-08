@@ -1,6 +1,7 @@
 import type { Request } from "../../types/request.js";
 import type { Message } from "../../types/message.js";
 import type { ContentPart } from "../../types/content-part.js";
+import type { Warning } from "../../types/response.js";
 import {
   isTextPart,
   isImagePart,
@@ -51,6 +52,7 @@ function translateContentPart(
 
 function translateMessage(
   message: Message,
+  warnings: Warning[],
 ): Array<Record<string, unknown>> {
   const results: Array<Record<string, unknown>> = [];
 
@@ -67,6 +69,14 @@ function translateMessage(
   } else if (message.role === Role.USER) {
     const content: Array<Record<string, unknown>> = [];
     for (const part of message.content) {
+      if (part.kind === "audio") {
+        warnings.push({ message: "Audio content parts are not supported by OpenAI-Compatible and were dropped" });
+        continue;
+      }
+      if (part.kind === "document") {
+        warnings.push({ message: "Document content parts are not supported by OpenAI-Compatible and were dropped" });
+        continue;
+      }
       const translated = translateContentPart(part);
       if (translated) {
         content.push(translated);
@@ -151,16 +161,21 @@ function translateToolChoice(
 export function translateRequest(
   request: Request,
   streaming: boolean,
-): { body: Record<string, unknown>; headers: Record<string, string> } {
+): { body: Record<string, unknown>; headers: Record<string, string>; warnings: Warning[] } {
+  const warnings: Warning[] = [];
   const body: Record<string, unknown> = {
     model: request.model,
     stream: streaming,
   };
 
+  if (streaming) {
+    body.stream_options = { include_usage: true };
+  }
+
   // Build messages array
   const messages: Array<Record<string, unknown>> = [];
   for (const message of request.messages) {
-    const translated = translateMessage(message);
+    const translated = translateMessage(message, warnings);
     for (const item of translated) {
       messages.push(item);
     }
@@ -229,5 +244,5 @@ export function translateRequest(
     }
   }
 
-  return { body, headers: {} };
+  return { body, headers: {}, warnings };
 }

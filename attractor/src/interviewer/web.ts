@@ -20,6 +20,14 @@ export class WebInterviewer implements Interviewer {
     });
   }
 
+  async askMultiple(questions: Question[]): Promise<Answer[]> {
+    const answers: Answer[] = [];
+    for (const q of questions) {
+      answers.push(await this.ask(q));
+    }
+    return answers;
+  }
+
   inform(message: string, stage: string): Promise<void> {
     this.messages.push({ message, stage });
     return Promise.resolve();

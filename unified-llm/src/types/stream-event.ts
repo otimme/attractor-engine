@@ -1,4 +1,4 @@
-import type { FinishReason, Usage, Response } from "./response.js";
+import type { FinishReason, Usage, Response, Warning } from "./response.js";
 
 export const StreamEventType = {
   STREAM_START: "stream_start",
@@ -24,6 +24,7 @@ export interface StreamStartEvent {
   type: typeof StreamEventType.STREAM_START;
   id?: string;
   model?: string;
+  warnings?: Warning[];
   raw?: unknown;
 }
 
@@ -107,8 +108,7 @@ export interface ErrorEvent {
 export interface ProviderEvent {
   type: typeof StreamEventType.PROVIDER_EVENT;
   eventType: string;
-  data: unknown;
-  raw?: unknown;
+  raw: unknown;
 }
 
 export type StreamEvent =

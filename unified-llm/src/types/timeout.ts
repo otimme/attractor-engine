@@ -4,7 +4,6 @@ export interface TimeoutConfig {
 }
 
 export interface AdapterTimeout {
-  connect: number;
   request: number;
   streamRead: number;
 }

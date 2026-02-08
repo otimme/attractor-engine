@@ -307,6 +307,53 @@ describe("shell", () => {
     expect(result).toContain("[exit code: 0]");
   });
 
+  test("returns abort error when signal is already aborted", async () => {
+    const env = new StubExecutionEnvironment({
+      defaultExecResult: {
+        stdout: "should not run",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 0,
+      },
+    });
+    const tool = createShellTool({
+      defaultTimeoutMs: 10000,
+      maxTimeoutMs: 600000,
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const result = await tool.executor(
+      { command: "echo hello" },
+      env,
+      controller.signal,
+    );
+    expect(result).toContain("Command aborted before execution");
+  });
+
+  test("receives abort signal parameter", async () => {
+    const env = new StubExecutionEnvironment({
+      defaultExecResult: {
+        stdout: "ok",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        durationMs: 10,
+      },
+    });
+    const tool = createShellTool({
+      defaultTimeoutMs: 10000,
+      maxTimeoutMs: 600000,
+    });
+    const controller = new AbortController();
+    const result = await tool.executor(
+      { command: "echo ok" },
+      env,
+      controller.signal,
+    );
+    expect(result).toContain("[exit code: 0]");
+  });
+
   test("caps timeout at maxTimeoutMs", async () => {
     const env = new StubExecutionEnvironment({
       commandResults: new Map([
@@ -348,6 +395,41 @@ describe("grep", () => {
     expect(result).toContain("hello");
     expect(result).toContain("/test/a.ts");
     expect(result).toContain("/test/b.ts");
+  });
+
+  test("output_mode files_with_matches returns only file paths", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/test/a.ts", "const hello = 1;\nconst hello = 2;"],
+        ["/test/b.ts", "hello there"],
+      ]),
+    });
+    const tool = createGrepTool();
+    const result = await tool.executor(
+      { pattern: "hello", output_mode: "files_with_matches" },
+      env,
+    );
+    expect(result).toContain("/test/a.ts");
+    expect(result).toContain("/test/b.ts");
+    // Should not contain line numbers or content
+    expect(result).not.toContain(":1:");
+    expect(result).not.toContain("const");
+  });
+
+  test("output_mode count returns match counts per file", async () => {
+    const env = new StubExecutionEnvironment({
+      files: new Map([
+        ["/test/a.ts", "hello\nhello\nworld"],
+        ["/test/b.ts", "hello there"],
+      ]),
+    });
+    const tool = createGrepTool();
+    const result = await tool.executor(
+      { pattern: "hello", output_mode: "count" },
+      env,
+    );
+    expect(result).toContain("/test/a.ts:2");
+    expect(result).toContain("/test/b.ts:1");
   });
 });
 

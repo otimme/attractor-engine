@@ -9,7 +9,7 @@ import type { TimeoutConfig } from "../types/timeout.js";
 import { StreamAccumulator } from "../utils/stream-accumulator.js";
 import type { Client } from "../client/client.js";
 import { getDefaultClient } from "../client/default-client.js";
-import { ConfigurationError, RequestTimeoutError } from "../types/errors.js";
+import { ConfigurationError, RequestTimeoutError, UnsupportedToolChoiceError, InvalidToolCallError } from "../types/errors.js";
 import { validateToolName } from "../utils/validate-tool-name.js";
 import { validateJsonSchema } from "../utils/validate-json-schema.js";
 import { retry } from "../utils/retry.js";
@@ -19,12 +19,12 @@ import type { StepResult, StreamResult } from "./types.js";
 
 function toAdapterTimeout(timeout: number | TimeoutConfig, remainingMs?: number): AdapterTimeout {
   if (typeof timeout === "number") {
-    const streamMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
-    return { connect: 10_000, request: 120_000, streamRead: streamMs };
+    const requestMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
+    return { request: requestMs, streamRead: 30_000 };
   }
-  const streamMs = timeout.perStep ?? timeout.total ?? 30_000;
-  const clamped = remainingMs != null ? Math.min(streamMs, remainingMs) : streamMs;
-  return { connect: 10_000, request: 120_000, streamRead: clamped };
+  const requestMs = timeout.perStep ?? timeout.total ?? 120_000;
+  const clamped = remainingMs != null ? Math.min(requestMs, remainingMs) : requestMs;
+  return { request: clamped, streamRead: 30_000 };
 }
 
 export type StreamOptions = GenerateOptions;
@@ -97,7 +97,7 @@ class StreamResultImpl implements StreamResult {
     return this.responsePromise;
   }
 
-  partialResponse(): Response {
+  get partialResponse(): Response {
     return this.accumulator.response();
   }
 
@@ -128,12 +128,27 @@ export function stream(options: StreamOptions): StreamResult {
     throw new ConfigurationError("Cannot specify both 'prompt' and 'messages'");
   }
 
+  const client = options.client ?? getDefaultClient();
+
   if (options.tools) {
     for (const tool of options.tools) {
       const nameError = validateToolName(tool.name);
       if (nameError) {
         throw new ConfigurationError(`Invalid tool name "${tool.name}": ${nameError}`);
       }
+      const params = tool.parameters;
+      if (Object.keys(params).length > 0 && params["type"] !== "object") {
+        throw new ConfigurationError(
+          `Tool "${tool.name}" parameters must have "type": "object" at the root`,
+        );
+      }
+    }
+  }
+
+  if (options.toolChoice) {
+    const adapter = client.resolveProvider(options.provider);
+    if (adapter.supportsToolChoice && !adapter.supportsToolChoice(options.toolChoice.mode)) {
+      throw new UnsupportedToolChoiceError(adapter.name, options.toolChoice.mode);
     }
   }
 
@@ -159,7 +174,6 @@ export function stream(options: StreamOptions): StreamResult {
     }
 
     const maxToolRounds = options.maxToolRounds ?? 1;
-    const client = options.client ?? getDefaultClient();
     const steps: StepResult[] = [];
 
     const timeoutCfg = typeof options.timeout === "number"
@@ -266,7 +280,7 @@ export function stream(options: StreamOptions): StreamResult {
             if (toolDef.parameters && Object.keys(toolDef.parameters).length > 0) {
               const validation = validateJsonSchema(args, toolDef.parameters);
               if (!validation.valid) {
-                const validationError = new Error(`Tool argument validation failed: ${validation.errors}`);
+                const validationError = new InvalidToolCallError(`Tool argument validation failed: ${validation.errors}`);
 
                 if (options.repairToolCall) {
                   const toolCall = buildToolCall(tc);
@@ -316,6 +330,12 @@ export function stream(options: StreamOptions): StreamResult {
         steps.push(step);
 
         if (options.stopWhen && options.stopWhen(steps)) {
+          yield {
+            type: StreamEventType.FINISH,
+            finishReason: response.finishReason,
+            usage: response.usage,
+            response,
+          };
           break;
         }
 

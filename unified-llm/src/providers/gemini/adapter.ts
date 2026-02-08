@@ -15,10 +15,9 @@ import {
   ContentFilterError,
   QuotaExceededError,
   RequestTimeoutError,
-  ProviderError,
 } from "../../types/errors.js";
 import { classifyByMessage } from "../../utils/error-classify.js";
-import { httpRequest, httpRequestStream } from "../../utils/http.js";
+import { httpRequest, httpRequestStream, parseRetryAfterHeader } from "../../utils/http.js";
 import { parseSSE } from "../../utils/sse.js";
 import { str, rec } from "../../utils/extract.js";
 import { translateRequest } from "./request-translator.js";
@@ -34,18 +33,6 @@ export interface GeminiAdapterOptions {
 }
 
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
-
-function parseRetryAfterHeader(headers: Headers): number | undefined {
-  const value = headers.get("retry-after");
-  if (value === null) {
-    return undefined;
-  }
-  const seconds = Number(value);
-  if (!Number.isNaN(seconds) && seconds > 0) {
-    return seconds;
-  }
-  return undefined;
-}
 
 function mapGrpcStatus(
   grpcStatus: string,
@@ -170,7 +157,7 @@ export class GeminiAdapter implements ProviderAdapter {
 
   async complete(request: Request): Promise<Response> {
     const resolved = await resolveFileImages(request);
-    const { body } = translateRequest(resolved);
+    const { body, warnings } = translateRequest(resolved);
 
     const url = `${this.baseUrl}/v1beta/models/${request.model}:generateContent?key=${this.apiKey}`;
     const headers = this.buildHeaders();
@@ -188,7 +175,9 @@ export class GeminiAdapter implements ProviderAdapter {
     });
 
     const responseBody = rec(response.body) ?? {};
-    return translateResponse(responseBody, response.rateLimit);
+    const result = translateResponse(responseBody, response.rateLimit);
+    result.warnings = [...result.warnings, ...warnings];
+    return result;
   }
 
   async *stream(request: Request): AsyncGenerator<StreamEvent> {

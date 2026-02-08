@@ -43,7 +43,7 @@ describe("createGeminiProfile", () => {
 
   test("tools() returns definitions matching registry", () => {
     const defs = profile.tools();
-    expect(defs.length).toBe(8);
+    expect(defs.length).toBe(10);
     const names = defs.map((d) => d.name);
     expect(names).toContain("read_file");
     expect(names).toContain("edit_file");
@@ -63,7 +63,7 @@ describe("createGeminiProfile", () => {
   });
 
   test("has correct capability flags", () => {
-    expect(profile.supportsReasoning).toBe(false);
+    expect(profile.supportsReasoning).toBe(true);
     expect(profile.supportsStreaming).toBe(true);
     expect(profile.supportsParallelToolCalls).toBe(true);
     expect(profile.contextWindowSize).toBe(1_000_000);
@@ -106,7 +106,7 @@ describe("createGeminiProfile", () => {
     expect(names).toContain("send_input");
     expect(names).toContain("wait");
     expect(names).toContain("close_agent");
-    expect(profileWithSubagents.tools().length).toBe(12);
+    expect(profileWithSubagents.tools().length).toBe(14);
   });
 
   test("list_dir returns formatted directory listing", async () => {

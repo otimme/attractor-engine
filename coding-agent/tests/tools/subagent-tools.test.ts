@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { StubExecutionEnvironment } from "../stubs/stub-env.js";
-import type { SubAgentHandle, SessionFactory } from "../../src/tools/subagent-tools.js";
+import type { ExecutionEnvironment } from "../../src/types/index.js";
+import type { SubAgentHandle, SessionFactory, SubAgentDepthConfig } from "../../src/tools/subagent-tools.js";
 import {
   createSpawnAgentTool,
   createSendInputTool,
@@ -8,9 +9,18 @@ import {
   createCloseAgentTool,
 } from "../../src/tools/subagent-tools.js";
 
+interface FactoryOptions {
+  task: string;
+  workingDir?: string;
+  model?: string;
+  maxTurns?: number;
+  depthConfig?: SubAgentDepthConfig;
+  executionEnv?: ExecutionEnvironment;
+}
+
 function createMockFactory(): {
   factory: SessionFactory;
-  lastOptions: { task: string; workingDir?: string; model?: string; maxTurns?: number } | null;
+  lastOptions: FactoryOptions | null;
   handle: SubAgentHandle;
 } {
   const submitted: string[] = [];
@@ -30,7 +40,7 @@ function createMockFactory(): {
     },
   };
 
-  let lastOptions: { task: string; workingDir?: string; model?: string; maxTurns?: number } | null = null;
+  let lastOptions: FactoryOptions | null = null;
 
   const factory: SessionFactory = async (options) => {
     lastOptions = options;
@@ -75,6 +85,36 @@ describe("spawn_agent", () => {
     expect(result).toContain("agent-1");
     expect(result).toContain("running");
     expect(agents.has("agent-1")).toBe(true);
+  });
+
+  test("propagates incremented depth to child session", async () => {
+    const agents = new Map<string, SubAgentHandle>();
+    const mock = createMockFactory();
+    const env = new StubExecutionEnvironment();
+    const tool = createSpawnAgentTool(mock.factory, agents, { currentDepth: 1, maxDepth: 3 });
+
+    await tool.executor({ task: "subtask" }, env);
+    expect(mock.lastOptions?.depthConfig).toEqual({ currentDepth: 2, maxDepth: 3 });
+  });
+
+  test("passes undefined depthConfig when no parent depth", async () => {
+    const agents = new Map<string, SubAgentHandle>();
+    const mock = createMockFactory();
+    const env = new StubExecutionEnvironment();
+    const tool = createSpawnAgentTool(mock.factory, agents);
+
+    await tool.executor({ task: "subtask" }, env);
+    expect(mock.lastOptions?.depthConfig).toBeUndefined();
+  });
+
+  test("passes parent executionEnv to factory", async () => {
+    const agents = new Map<string, SubAgentHandle>();
+    const mock = createMockFactory();
+    const env = new StubExecutionEnvironment();
+    const tool = createSpawnAgentTool(mock.factory, agents);
+
+    await tool.executor({ task: "subtask" }, env);
+    expect(mock.lastOptions?.executionEnv).toBe(env);
   });
 });
 

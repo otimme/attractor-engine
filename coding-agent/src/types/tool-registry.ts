@@ -6,6 +6,7 @@ export interface RegisteredTool {
   executor: (
     args: Record<string, unknown>,
     env: ExecutionEnvironment,
+    signal?: AbortSignal,
   ) => Promise<string>;
 }
 

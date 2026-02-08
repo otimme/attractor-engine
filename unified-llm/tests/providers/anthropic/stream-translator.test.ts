@@ -385,6 +385,71 @@ describe("Anthropic stream translator", () => {
     expect(events.at(0)?.type).toBe(StreamEventType.STREAM_START);
   });
 
+  test("emits PROVIDER_EVENT for unrecognized event types", async () => {
+    const sseEvents: SSEEvent[] = [
+      makeSSE({
+        type: "message_start",
+        message: { model: "claude-opus-4-6", usage: { input_tokens: 1 } },
+      }),
+      makeSSE({
+        type: "custom_event",
+        data: { key: "value" },
+      }),
+      makeSSE({ type: "message_stop" }),
+    ];
+
+    const events = await collectEvents(sseEvents);
+
+    const providerEvent = events.find(
+      (e) => e.type === StreamEventType.PROVIDER_EVENT,
+    );
+    expect(providerEvent).toBeDefined();
+    if (providerEvent?.type === StreamEventType.PROVIDER_EVENT) {
+      expect(providerEvent.eventType).toBe("custom_event");
+    }
+  });
+
+  test("includes raw usage data on FINISH event", async () => {
+    const sseEvents: SSEEvent[] = [
+      makeSSE({
+        type: "message_start",
+        message: {
+          model: "claude-opus-4-6",
+          usage: { input_tokens: 10, cache_read_input_tokens: 5 },
+        },
+      }),
+      makeSSE({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      }),
+      makeSSE({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "Hi" },
+      }),
+      makeSSE({ type: "content_block_stop", index: 0 }),
+      makeSSE({
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 2 },
+      }),
+      makeSSE({ type: "message_stop" }),
+    ];
+
+    const events = await collectEvents(sseEvents);
+
+    const finish = events.find((e) => e.type === StreamEventType.FINISH);
+    expect(finish?.type).toBe(StreamEventType.FINISH);
+    if (finish?.type === StreamEventType.FINISH) {
+      expect(finish.usage?.raw).toBeDefined();
+      const raw = finish.usage?.raw as Record<string, unknown>;
+      expect(raw["input_tokens"]).toBe(10);
+      expect(raw["output_tokens"]).toBe(2);
+      expect(raw["cache_read_input_tokens"]).toBe(5);
+    }
+  });
+
   test("estimates reasoningTokens from thinking deltas on FINISH", async () => {
     const thinkingText = "Let me think carefully about this...";
     const sseEvents: SSEEvent[] = [

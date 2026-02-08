@@ -628,4 +628,93 @@ describe("Gemini request translator", () => {
 
     expect(toolCallIdMap.get("tc1")).toBe("get_weather");
   });
+
+  test("translates tool result with image data as inlineData part", () => {
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const request: Request = {
+      model: "gemini-3-pro-preview",
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Analyze" }] },
+        {
+          role: Role.ASSISTANT,
+          content: [
+            {
+              kind: "tool_call",
+              toolCall: { id: "tc1", name: "screenshot", arguments: {} },
+            },
+          ],
+        },
+        {
+          role: Role.TOOL,
+          content: [
+            {
+              kind: "tool_result",
+              toolResult: {
+                toolCallId: "tc1",
+                content: "screenshot taken",
+                isError: false,
+                imageData: imageBytes,
+                imageMediaType: "image/png",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const { body } = translateRequest(request);
+    const contents = body.contents as Array<{ parts: Array<Record<string, unknown>> }>;
+    const toolParts = contents.at(2)?.parts;
+
+    expect(toolParts).toHaveLength(2);
+    expect(toolParts?.at(0)).toEqual({
+      functionResponse: {
+        name: "screenshot",
+        response: { result: "screenshot taken" },
+      },
+    });
+    const inlineData = toolParts?.at(1)?.inlineData as Record<string, unknown> | undefined;
+    expect(inlineData?.mimeType).toBe("image/png");
+    expect(typeof inlineData?.data).toBe("string");
+  });
+
+  test("emits warning for audio content parts", () => {
+    const request: Request = {
+      model: "gemini-3-pro-preview",
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "text", text: "Listen" },
+            { kind: "audio", audio: { data: new Uint8Array([1, 2]), mediaType: "audio/wav" } },
+          ],
+        },
+      ],
+    };
+
+    const { warnings } = translateRequest(request);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("Audio");
+  });
+
+  test("emits warning for document content parts", () => {
+    const request: Request = {
+      model: "gemini-3-pro-preview",
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "text", text: "Read this" },
+            { kind: "document", document: { data: new Uint8Array([1]), mediaType: "application/pdf" } },
+          ],
+        },
+      ],
+    };
+
+    const { warnings } = translateRequest(request);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("Document");
+  });
 });

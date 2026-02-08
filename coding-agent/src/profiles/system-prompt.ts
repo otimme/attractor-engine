@@ -15,12 +15,8 @@ export function buildEnvironmentContext(
     `OS version: ${env.osVersion()}`,
     `Today's date: ${date}`,
   ];
-  if (options?.isGitRepo !== undefined) {
-    lines.push(`Git repository: ${options.isGitRepo ? "yes" : "no"}`);
-  }
-  if (options?.gitBranch) {
-    lines.push(`Git branch: ${options.gitBranch}`);
-  }
+  lines.push(`Is git repository: ${options?.isGitRepo ? "true" : "false"}`);
+  lines.push(`Git branch: ${options?.gitBranch || "(none)"}`);
   if (options?.modifiedCount !== undefined) {
     lines.push(`Modified files: ${options.modifiedCount}`);
   }

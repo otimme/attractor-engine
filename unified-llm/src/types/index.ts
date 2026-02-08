@@ -18,6 +18,7 @@ export type {
   ContentPart,
   ExtendedContentPart,
 } from "./content-part.js";
+export { ContentKind } from "./content-part.js";
 export {
   isTextPart,
   isImagePart,

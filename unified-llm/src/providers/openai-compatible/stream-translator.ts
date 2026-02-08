@@ -34,6 +34,7 @@ function translateUsage(
     inputTokens,
     outputTokens,
     totalTokens: totalFromApi > 0 ? totalFromApi : inputTokens + outputTokens,
+    raw: usageData,
   };
 
   const completionDetails = rec(usageData["completion_tokens_details"]);
@@ -63,6 +64,16 @@ export async function* translateStream(
   let finishReason = "";
 
   for await (const sse of events) {
+    // Emit PROVIDER_EVENT for non-message SSE events
+    if (sse.event !== "message") {
+      yield {
+        type: StreamEventType.PROVIDER_EVENT,
+        eventType: sse.event,
+        raw: sse.data,
+      };
+      continue;
+    }
+
     // Handle [DONE] sentinel
     if (sse.data === "[DONE]") {
       if (textStarted) {

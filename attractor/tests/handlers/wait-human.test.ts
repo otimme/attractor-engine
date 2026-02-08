@@ -46,6 +46,14 @@ class QueueInterviewer implements Interviewer {
     return answer;
   }
 
+  async askMultiple(questions: Question[]): Promise<Answer[]> {
+    const answers: Answer[] = [];
+    for (const q of questions) {
+      answers.push(await this.ask(q));
+    }
+    return answers;
+  }
+
   async inform(_message: string, _stage: string): Promise<void> {
     // no-op
   }

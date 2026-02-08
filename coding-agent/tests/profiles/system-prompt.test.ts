@@ -27,7 +27,7 @@ describe("buildEnvironmentContext", () => {
       gitBranch: "feat/cool",
     });
 
-    expect(result).toContain("Git repository: yes");
+    expect(result).toContain("Is git repository: true");
     expect(result).toContain("Git branch: feat/cool");
   });
 
@@ -42,22 +42,30 @@ describe("buildEnvironmentContext", () => {
     expect(result).toContain("Knowledge cutoff: May 2025");
   });
 
-  test("shows git repo as no when isGitRepo is false", () => {
+  test("shows git repo as false when isGitRepo is false", () => {
     const env = new StubExecutionEnvironment();
     const result = buildEnvironmentContext(env, { isGitRepo: false });
 
-    expect(result).toContain("Git repository: no");
-    expect(result).not.toContain("Git branch:");
+    expect(result).toContain("Is git repository: false");
+    expect(result).toContain("Git branch: (none)");
   });
 
-  test("omits optional fields when not provided", () => {
+  test("defaults isGitRepo to false and gitBranch to (none) when options empty", () => {
     const env = new StubExecutionEnvironment();
     const result = buildEnvironmentContext(env, {});
 
-    expect(result).not.toContain("Git repository:");
-    expect(result).not.toContain("Git branch:");
+    expect(result).toContain("Is git repository: false");
+    expect(result).toContain("Git branch: (none)");
     expect(result).not.toContain("Model:");
     expect(result).not.toContain("Knowledge cutoff:");
+  });
+
+  test("defaults isGitRepo to false and gitBranch to (none) when options undefined", () => {
+    const env = new StubExecutionEnvironment();
+    const result = buildEnvironmentContext(env);
+
+    expect(result).toContain("Is git repository: false");
+    expect(result).toContain("Git branch: (none)");
   });
 });
 

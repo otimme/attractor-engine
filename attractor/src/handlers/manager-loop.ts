@@ -8,6 +8,9 @@ import { getStringAttr, getIntegerAttr } from "../types/graph.js";
 import { StageStatus, createOutcome } from "../types/outcome.js";
 import { evaluateCondition } from "../conditions/evaluator.js";
 import type { Checkpoint } from "../types/checkpoint.js";
+import type { PipelineResult } from "../engine/runner.js";
+import { PipelineRunner } from "../engine/runner.js";
+import { parse } from "../parser/index.js";
 
 export type ChildProcess = {
   childLogsRoot: string;
@@ -43,15 +46,73 @@ function defaultSpawner(dotFile: string, logsRoot: string): ChildProcess {
   };
 }
 
+export type PipelineRunnerFactory = (
+  graph: Graph,
+  logsRoot: string,
+) => PipelineRunner;
+
+function createInProcessSpawner(
+  runnerFactory: PipelineRunnerFactory,
+): ChildProcessSpawner {
+  return (dotFile: string, logsRoot: string): ChildProcess => {
+    const childLogsRoot = join(logsRoot, "child");
+    mkdirSync(childLogsRoot, { recursive: true });
+
+    const dotSource = readFileSync(dotFile, "utf-8");
+    const graph = parse(dotSource);
+    const runner = runnerFactory(graph, childLogsRoot);
+
+    const runPromise = runner.run(graph).then((result: PipelineResult) => {
+      // Write final checkpoint so the observe loop can pick it up
+      const checkpoint: Checkpoint = {
+        timestamp: new Date().toISOString(),
+        currentNode: result.completedNodes[result.completedNodes.length - 1] ?? "",
+        completedNodes: result.completedNodes,
+        nodeRetries: {},
+        contextValues: result.context.snapshot(),
+        logs: [],
+      };
+      try {
+        writeFileSync(
+          join(childLogsRoot, "checkpoint.json"),
+          JSON.stringify(checkpoint),
+          "utf-8",
+        );
+      } catch {
+        // non-fatal
+      }
+      return result.outcome.status === StageStatus.SUCCESS ? 0 : 1;
+    });
+
+    return {
+      childLogsRoot,
+      waitForCompletion: async () => {
+        const exitCode = await runPromise;
+        return { exitCode };
+      },
+      kill: () => {
+        // In-process runner cannot be cancelled mid-execution
+      },
+    };
+  };
+}
+
 export interface ManagerLoopHandlerConfig {
   spawner?: ChildProcessSpawner;
+  runnerFactory?: PipelineRunnerFactory;
 }
 
 export class ManagerLoopHandler implements Handler {
   private readonly spawner: ChildProcessSpawner;
 
   constructor(config: ManagerLoopHandlerConfig = {}) {
-    this.spawner = config.spawner ?? defaultSpawner;
+    if (config.spawner) {
+      this.spawner = config.spawner;
+    } else if (config.runnerFactory) {
+      this.spawner = createInProcessSpawner(config.runnerFactory);
+    } else {
+      this.spawner = defaultSpawner;
+    }
   }
 
   async execute(

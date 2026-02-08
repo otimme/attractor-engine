@@ -14,9 +14,11 @@ import { getStringAttr, getBooleanAttr } from "../types/graph.js";
 import { selectEdge } from "./edge-selection.js";
 import { buildRetryPolicy, executeWithRetry } from "./retry.js";
 import { checkGoalGates, getRetryTarget } from "./goal-gates.js";
-import { saveCheckpoint } from "./checkpoint.js";
+import { saveCheckpoint, loadCheckpoint } from "./checkpoint.js";
 import { resolveFidelity } from "./fidelity.js";
+import { validateOrRaise } from "../validation/validate.js";
 import { incomingEdges } from "../types/graph.js";
+import { FidelityMode as FM } from "../types/fidelity.js";
 import { join } from "path";
 import { randomUUID } from "crypto";
 
@@ -129,6 +131,17 @@ function mirrorGraphAttributes(graph: Graph, context: Context): void {
   }
 }
 
+interface LoopState {
+  context: Context;
+  completedNodes: string[];
+  nodeOutcomes: Map<string, Outcome>;
+  nodeRetries: Map<string, number>;
+  currentNode: Node;
+  lastOutcome: Outcome;
+  restartCount: number;
+  degradeNextFidelity: boolean;
+}
+
 export class PipelineRunner {
   private config: PipelineRunnerConfig;
   private pipelineId: string;
@@ -148,19 +161,88 @@ export class PipelineRunner {
       }
     }
 
+    // Validate graph (rejects error-severity diagnostics)
+    validateOrRaise(graph, this.config.extraLintRules);
+
     // Initialize context
-    let context = new Context();
+    const context = new Context();
     mirrorGraphAttributes(graph, context);
 
-    const completedNodes: string[] = [];
-    const nodeOutcomes = new Map<string, Outcome>();
-    const logsRoot = this.config.logsRoot ?? "/tmp/attractor-logs";
-    let restartCount = 0;
+    const state: LoopState = {
+      context,
+      completedNodes: [],
+      nodeOutcomes: new Map(),
+      nodeRetries: new Map(),
+      currentNode: findStartNode(graph),
+      lastOutcome: createOutcome({ status: StageStatus.SUCCESS }),
+      restartCount: 0,
+      degradeNextFidelity: false,
+    };
 
     this.emitEvent(EventKind.PIPELINE_STARTED, { graphName: graph.name });
 
-    let currentNode = findStartNode(graph);
-    let lastOutcome = createOutcome({ status: StageStatus.SUCCESS });
+    return this.executeLoop(graph, state);
+  }
+
+  async resume(graph: Graph, checkpointPath: string): Promise<PipelineResult> {
+    const checkpoint = await loadCheckpoint(checkpointPath);
+
+    // Restore context
+    const context = new Context();
+    context.applyUpdates(checkpoint.contextValues);
+
+    // Restore completedNodes
+    const completedNodes = [...checkpoint.completedNodes];
+
+    // Restore nodeRetries
+    const nodeRetries = new Map<string, number>();
+    for (const [nodeId, count] of Object.entries(checkpoint.nodeRetries)) {
+      nodeRetries.set(nodeId, count);
+    }
+
+    // Determine next node: select edge from checkpoint.currentNode using last outcome
+    const checkpointNode = graph.nodes.get(checkpoint.currentNode);
+    if (!checkpointNode) {
+      throw new Error(`Checkpoint currentNode not found in graph: ${checkpoint.currentNode}`);
+    }
+
+    const outcomeStatus = context.get("outcome", StageStatus.SUCCESS);
+    const lastOutcome = createOutcome({
+      status: outcomeStatus as StageStatus,
+      preferredLabel: context.get("preferred_label"),
+    });
+
+    const nextEdge = selectEdge(checkpointNode, lastOutcome, context, graph);
+    if (!nextEdge) {
+      throw new Error(`No outgoing edge from checkpoint node: ${checkpoint.currentNode}`);
+    }
+
+    const nextNode = graph.nodes.get(nextEdge.to);
+    if (!nextNode) {
+      throw new Error(`Edge target node not found: ${nextEdge.to}`);
+    }
+
+    const state: LoopState = {
+      context,
+      completedNodes,
+      nodeOutcomes: new Map(),
+      nodeRetries,
+      currentNode: nextNode,
+      lastOutcome,
+      restartCount: 0,
+      degradeNextFidelity: true,
+    };
+
+    this.emitEvent(EventKind.PIPELINE_STARTED, { graphName: graph.name });
+
+    return this.executeLoop(graph, state);
+  }
+
+  private async executeLoop(graph: Graph, state: LoopState): Promise<PipelineResult> {
+    let { context } = state;
+    const { completedNodes, nodeOutcomes, nodeRetries } = state;
+    let { currentNode, lastOutcome, restartCount, degradeNextFidelity } = state;
+    const logsRoot = this.config.logsRoot ?? "/tmp/attractor-logs";
 
     while (true) {
       // Step 1: Check for terminal node
@@ -190,6 +272,12 @@ export class PipelineRunner {
         break;
       }
 
+      // Apply degraded fidelity for first node after resume
+      if (degradeNextFidelity) {
+        context.set("_fidelity.mode", FM.SUMMARY_HIGH);
+        degradeNextFidelity = false;
+      }
+
       // Step 2: Execute node handler with retry policy
       context.set("current_node", currentNode.id);
       this.emitEvent(EventKind.STAGE_STARTED, { nodeId: currentNode.id });
@@ -208,7 +296,7 @@ export class PipelineRunner {
       }
 
       const retryPolicy = buildRetryPolicy(currentNode, graph);
-      const outcome = await executeWithRetry(
+      const retryResult = await executeWithRetry(
         currentNode,
         context,
         graph,
@@ -216,10 +304,12 @@ export class PipelineRunner {
         handler,
         retryPolicy,
       );
+      const outcome = retryResult.outcome;
 
       // Step 3: Record completion
       completedNodes.push(currentNode.id);
       nodeOutcomes.set(currentNode.id, outcome);
+      nodeRetries.set(currentNode.id, retryResult.attempts);
       lastOutcome = outcome;
 
       this.emitEvent(EventKind.STAGE_COMPLETED, {
@@ -235,11 +325,15 @@ export class PipelineRunner {
       }
 
       // Step 5: Save checkpoint
+      const retriesRecord: Record<string, number> = {};
+      for (const [nodeId, count] of nodeRetries) {
+        retriesRecord[nodeId] = count;
+      }
       const checkpoint: Checkpoint = {
         timestamp: new Date().toISOString(),
         currentNode: currentNode.id,
         completedNodes: [...completedNodes],
-        nodeRetries: {},
+        nodeRetries: retriesRecord,
         contextValues: context.snapshot(),
         logs: [...context.logs()],
       };
@@ -255,7 +349,16 @@ export class PipelineRunner {
       // Step 6: Select next edge
       const nextEdge = selectEdge(currentNode, outcome, context, graph);
       if (!nextEdge) {
+        // GAP-2: Try retry_target before terminating on failure
         if (outcome.status === StageStatus.FAIL) {
+          const failRetryTarget = getRetryTarget(currentNode, graph);
+          if (failRetryTarget) {
+            const targetNode = graph.nodes.get(failRetryTarget);
+            if (targetNode) {
+              currentNode = targetNode;
+              continue;
+            }
+          }
           this.emitEvent(EventKind.PIPELINE_FAILED, {
             reason: "Stage failed with no outgoing fail edge",
             nodeId: currentNode.id,

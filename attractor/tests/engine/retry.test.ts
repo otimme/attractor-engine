@@ -86,7 +86,8 @@ describe("executeWithRetry", () => {
       noRetryPolicy(),
     );
 
-    expect(result.status).toBe(StageStatus.SUCCESS);
+    expect(result.outcome.status).toBe(StageStatus.SUCCESS);
+    expect(result.attempts).toBe(1);
   });
 
   test("returns FAIL immediately without retry", async () => {
@@ -103,8 +104,9 @@ describe("executeWithRetry", () => {
       fastRetryPolicy(3),
     );
 
-    expect(result.status).toBe(StageStatus.FAIL);
-    expect(result.failureReason).toBe("broken");
+    expect(result.outcome.status).toBe(StageStatus.FAIL);
+    expect(result.outcome.failureReason).toBe("broken");
+    expect(result.attempts).toBe(1);
   });
 
   test("retries on RETRY status and eventually succeeds", async () => {
@@ -126,7 +128,8 @@ describe("executeWithRetry", () => {
       fastRetryPolicy(5),
     );
 
-    expect(result.status).toBe(StageStatus.SUCCESS);
+    expect(result.outcome.status).toBe(StageStatus.SUCCESS);
+    expect(result.attempts).toBe(3);
     expect(callCount).toBe(3);
   });
 
@@ -144,8 +147,9 @@ describe("executeWithRetry", () => {
       fastRetryPolicy(2),
     );
 
-    expect(result.status).toBe(StageStatus.FAIL);
-    expect(result.failureReason).toBe("max retries exceeded");
+    expect(result.outcome.status).toBe(StageStatus.FAIL);
+    expect(result.outcome.failureReason).toBe("max retries exceeded");
+    expect(result.attempts).toBe(2);
   });
 
   test("returns PARTIAL_SUCCESS when allow_partial and retries exhausted", async () => {
@@ -164,8 +168,8 @@ describe("executeWithRetry", () => {
       fastRetryPolicy(2),
     );
 
-    expect(result.status).toBe(StageStatus.PARTIAL_SUCCESS);
-    expect(result.notes).toContain("partial accepted");
+    expect(result.outcome.status).toBe(StageStatus.PARTIAL_SUCCESS);
+    expect(result.outcome.notes).toContain("partial accepted");
   });
 
   test("retries on exception when shouldRetry returns true", async () => {
@@ -187,7 +191,8 @@ describe("executeWithRetry", () => {
       fastRetryPolicy(3),
     );
 
-    expect(result.status).toBe(StageStatus.SUCCESS);
+    expect(result.outcome.status).toBe(StageStatus.SUCCESS);
+    expect(result.attempts).toBe(2);
     expect(callCount).toBe(2);
   });
 
@@ -211,7 +216,7 @@ describe("executeWithRetry", () => {
       policy,
     );
 
-    expect(result.status).toBe(StageStatus.FAIL);
-    expect(result.failureReason).toContain("authentication error");
+    expect(result.outcome.status).toBe(StageStatus.FAIL);
+    expect(result.outcome.failureReason).toContain("authentication error");
   });
 });

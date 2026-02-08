@@ -2,24 +2,33 @@ import type { Request } from "../../types/request.js";
 import type { ContentPart } from "../../types/content-part.js";
 import type { ToolDefinition, ToolChoice } from "../../types/tool.js";
 import type { Message } from "../../types/message.js";
+import type { Warning } from "../../types/response.js";
 import { Role } from "../../types/role.js";
 
 interface TranslatedRequest {
   body: Record<string, unknown>;
   headers: Record<string, string>;
+  warnings: Warning[];
+}
+
+interface TranslatePartResult {
+  translated: Record<string, unknown> | undefined;
+  warning?: Warning;
 }
 
 function translateContentPart(
   part: ContentPart,
-): Record<string, unknown> | undefined {
+): TranslatePartResult {
   switch (part.kind) {
     case "text":
-      return { type: "text", text: part.text };
+      return { translated: { type: "text", text: part.text } };
     case "image": {
       if (part.image.url) {
         return {
-          type: "image",
-          source: { type: "url", url: part.image.url },
+          translated: {
+            type: "image",
+            source: { type: "url", url: part.image.url },
+          },
         };
       }
       if (part.image.data) {
@@ -27,26 +36,40 @@ function translateContentPart(
           String.fromCharCode(...part.image.data),
         );
         return {
-          type: "image",
-          source: {
-            type: "base64",
-            media_type: part.image.mediaType ?? "image/png",
-            data: base64,
+          translated: {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: part.image.mediaType ?? "image/png",
+              data: base64,
+            },
           },
         };
       }
-      return undefined;
+      return { translated: undefined };
     }
+    case "audio":
+      return {
+        translated: undefined,
+        warning: { message: "Audio content parts are not supported by the Anthropic provider and were dropped", code: "unsupported_part" },
+      };
+    case "document":
+      return {
+        translated: undefined,
+        warning: { message: "Document content parts are not supported by the Anthropic provider and were dropped", code: "unsupported_part" },
+      };
     case "tool_call": {
       const input =
         typeof part.toolCall.arguments === "string"
           ? JSON.parse(part.toolCall.arguments)
           : part.toolCall.arguments;
       return {
-        type: "tool_use",
-        id: part.toolCall.id,
-        name: part.toolCall.name,
-        input,
+        translated: {
+          type: "tool_use",
+          id: part.toolCall.id,
+          name: part.toolCall.name,
+          input,
+        },
       };
     }
     case "tool_result": {
@@ -71,33 +94,41 @@ function translateContentPart(
           },
         ];
         return {
-          type: "tool_result",
-          tool_use_id: part.toolResult.toolCallId,
-          content: contentArray,
-          is_error: part.toolResult.isError,
+          translated: {
+            type: "tool_result",
+            tool_use_id: part.toolResult.toolCallId,
+            content: contentArray,
+            is_error: part.toolResult.isError,
+          },
         };
       }
 
       return {
-        type: "tool_result",
-        tool_use_id: part.toolResult.toolCallId,
-        content: textContent,
-        is_error: part.toolResult.isError,
+        translated: {
+          type: "tool_result",
+          tool_use_id: part.toolResult.toolCallId,
+          content: textContent,
+          is_error: part.toolResult.isError,
+        },
       };
     }
     case "thinking":
       return {
-        type: "thinking",
-        thinking: part.thinking.text,
-        signature: part.thinking.signature,
+        translated: {
+          type: "thinking",
+          thinking: part.thinking.text,
+          signature: part.thinking.signature,
+        },
       };
     case "redacted_thinking":
       return {
-        type: "redacted_thinking",
-        data: part.thinking.text,
+        translated: {
+          type: "redacted_thinking",
+          data: part.thinking.text,
+        },
       };
     default:
-      return undefined;
+      return { translated: undefined };
   }
 }
 
@@ -154,11 +185,13 @@ export function translateRequest(request: Request): TranslatedRequest {
   const systemBlocks: Record<string, unknown>[] = [];
   const conversationMessages: AnthropicMessage[] = [];
   const headers: Record<string, string> = {};
+  const warnings: Warning[] = [];
 
   for (const message of request.messages) {
     if (message.role === Role.SYSTEM || message.role === Role.DEVELOPER) {
       for (const part of message.content) {
-        const translated = translateContentPart(part);
+        const { translated, warning } = translateContentPart(part);
+        if (warning) warnings.push(warning);
         if (translated) {
           systemBlocks.push(translated);
         }
@@ -168,7 +201,8 @@ export function translateRequest(request: Request): TranslatedRequest {
 
     const anthropicContent: Record<string, unknown>[] = [];
     for (const part of message.content) {
-      const translated = translateContentPart(part);
+      const { translated, warning } = translateContentPart(part);
+      if (warning) warnings.push(warning);
       if (translated) {
         anthropicContent.push(translated);
       }
@@ -237,12 +271,13 @@ export function translateRequest(request: Request): TranslatedRequest {
     body.thinking = anthropicOptions["thinking"];
   }
 
-  if (anthropicOptions?.["betaHeaders"]) {
-    const betaHeaders = anthropicOptions["betaHeaders"];
-    if (typeof betaHeaders === "string") {
-      headers["anthropic-beta"] = betaHeaders;
-    } else if (Array.isArray(betaHeaders)) {
-      const joined = betaHeaders
+  // Accept both snake_case (spec) and camelCase (legacy)
+  const betaHeadersValue = anthropicOptions?.["beta_headers"] ?? anthropicOptions?.["betaHeaders"];
+  if (betaHeadersValue) {
+    if (typeof betaHeadersValue === "string") {
+      headers["anthropic-beta"] = betaHeadersValue;
+    } else if (Array.isArray(betaHeadersValue)) {
+      const joined = betaHeadersValue
         .filter((h): h is string => typeof h === "string")
         .join(",");
       if (joined.length > 0) {
@@ -253,7 +288,7 @@ export function translateRequest(request: Request): TranslatedRequest {
 
   // M15: passthrough remaining providerOptions keys into body
   if (anthropicOptions) {
-    const knownKeys = new Set(["thinking", "betaHeaders", "autoCache"]);
+    const knownKeys = new Set(["thinking", "betaHeaders", "beta_headers", "autoCache", "auto_cache"]);
     for (const [key, value] of Object.entries(anthropicOptions)) {
       if (!knownKeys.has(key)) {
         body[key] = value;
@@ -280,5 +315,5 @@ export function translateRequest(request: Request): TranslatedRequest {
     }
   }
 
-  return { body, headers };
+  return { body, headers, warnings };
 }

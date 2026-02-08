@@ -73,7 +73,7 @@ describe("httpRequestStream", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: {},
-        timeout: { connect: 30_000, request: 30_000, streamRead: 50 },
+        timeout: { request: 30_000, streamRead: 50 },
         provider: "test",
       });
 
@@ -120,7 +120,7 @@ describe("httpRequestStream", () => {
         headers: { "content-type": "application/json" },
         body: {},
         // 100ms timeout is longer than 20ms interval, so it should not fire
-        timeout: { connect: 5000, request: 5000, streamRead: 100 },
+        timeout: { request: 5000, streamRead: 100 },
         provider: "test",
       });
 

@@ -73,6 +73,7 @@ export type {
   PipelineResult,
   GoalGateResult,
   FidelityResolution,
+  RetryResult,
 } from "./engine/index.js";
 
 // Backends

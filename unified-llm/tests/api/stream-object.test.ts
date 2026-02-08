@@ -379,6 +379,50 @@ describe("StreamObjectResult (Gap 2)", () => {
     expect(usage.totalTokens).toBe(15);
   });
 
+  test("result is directly async-iterable via Symbol.asyncIterator (Gap 10)", async () => {
+    const events: StreamEvent[] = [
+      { type: StreamEventType.STREAM_START, model: "test-model" },
+      {
+        type: StreamEventType.TOOL_CALL_START,
+        toolCallId: "tc-1",
+        toolName: "extract",
+      },
+      {
+        type: StreamEventType.TOOL_CALL_DELTA,
+        toolCallId: "tc-1",
+        argumentsDelta: '{"name": "Alice"}',
+      },
+      { type: StreamEventType.TOOL_CALL_END, toolCallId: "tc-1" },
+      {
+        type: StreamEventType.FINISH,
+        finishReason: { reason: "tool_calls" },
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      },
+    ];
+
+    const adapter = new StubAdapter("stub", [{ events }]);
+    const client = makeClient(adapter);
+
+    const result = streamObject({
+      model: "test-model",
+      prompt: "Extract",
+      schema: {
+        type: "object",
+        properties: { name: { type: "string" } },
+      },
+      strategy: "tool",
+      client,
+    });
+
+    const collected: unknown[] = [];
+    for await (const obj of result) {
+      collected.push(obj);
+    }
+
+    expect(collected.length).toBeGreaterThanOrEqual(1);
+    expect(collected[collected.length - 1]).toEqual({ name: "Alice" });
+  });
+
   test("usage resolves even on stream error", async () => {
     const events: StreamEvent[] = [
       { type: StreamEventType.STREAM_START, model: "test-model" },

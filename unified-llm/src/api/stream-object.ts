@@ -27,6 +27,7 @@ export interface StreamObjectResult {
   partialObjectStream: AsyncGenerator<unknown>;
   object(): Promise<unknown>;
   usage: Promise<Usage>;
+  [Symbol.asyncIterator](): AsyncIterator<unknown>;
 }
 
 function resolveStreamStrategy(
@@ -147,6 +148,9 @@ export function streamObject(
     partialObjectStream,
     object: () => objectPromise,
     usage: usagePromise,
+    [Symbol.asyncIterator]() {
+      return partialObjectStream[Symbol.asyncIterator]();
+    },
   };
 }
 
@@ -237,5 +241,8 @@ export function streamObjectWithJsonSchema(
     partialObjectStream,
     object: () => objectPromise,
     usage: usagePromise,
+    [Symbol.asyncIterator]() {
+      return partialObjectStream[Symbol.asyncIterator]();
+    },
   };
 }

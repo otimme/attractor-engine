@@ -12,6 +12,7 @@ export async function* translateStream(
   let outputTokens = 0;
   let reasoningTokens: number | undefined;
   let cacheReadTokens: number | undefined;
+  let rawUsage: Record<string, unknown> | undefined;
   let finishReason = "STOP";
   let yieldedStart = false;
   let emittedToolCalls = false;
@@ -19,6 +20,16 @@ export async function* translateStream(
   for await (const event of events) {
     if (event.data === "[DONE]") {
       break;
+    }
+
+    // Emit PROVIDER_EVENT for non-message SSE events
+    if (event.event !== "message") {
+      yield {
+        type: StreamEventType.PROVIDER_EVENT,
+        eventType: event.event,
+        raw: event.data,
+      };
+      continue;
     }
 
     let parsed: Record<string, unknown> | undefined;
@@ -101,6 +112,7 @@ export async function* translateStream(
       outputTokens = num(usageData["candidatesTokenCount"]);
       reasoningTokens = optNum(usageData["thoughtsTokenCount"]);
       cacheReadTokens = optNum(usageData["cachedContentTokenCount"]);
+      rawUsage = usageData;
     }
   }
 
@@ -115,6 +127,7 @@ export async function* translateStream(
     totalTokens: inputTokens + outputTokens,
     reasoningTokens,
     cacheReadTokens,
+    raw: rawUsage,
   };
 
   yield {

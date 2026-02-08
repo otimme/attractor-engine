@@ -49,6 +49,75 @@ export function createListDirTool(): RegisteredTool {
   };
 }
 
+export function createWebSearchTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "web_search",
+      description:
+        "Search the web for information. Returns search results.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "The search query",
+          },
+          max_results: {
+            type: "integer",
+            description: "Maximum number of results to return (default: 5)",
+            default: 5,
+          },
+        },
+        required: ["query"],
+      },
+    },
+    executor: async (args, env) => {
+      const query = args.query as string;
+      const maxResults = (args.max_results as number | undefined) ?? 5;
+      const encoded = encodeURIComponent(query);
+      const command = `curl -s "https://html.duckduckgo.com/html/?q=${encoded}" | sed -n 's/.*<a rel="nofollow" class="result__a" href="\\([^"]*\\)">/\\1/p' | head -n ${maxResults}`;
+      const result = await env.execCommand(command, 15_000);
+
+      if (result.exitCode !== 0) {
+        return `Search failed (exit code ${result.exitCode}):\n${result.stderr}`;
+      }
+
+      return result.stdout || "No results found.";
+    },
+  };
+}
+
+export function createWebFetchTool(): RegisteredTool {
+  return {
+    definition: {
+      name: "web_fetch",
+      description:
+        "Fetch content from a URL and extract text.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The URL to fetch content from",
+          },
+        },
+        required: ["url"],
+      },
+    },
+    executor: async (args, env) => {
+      const url = args.url as string;
+      const command = `curl -sL ${JSON.stringify(url)} | head -c 50000`;
+      const result = await env.execCommand(command, 30_000);
+
+      if (result.exitCode !== 0) {
+        return `Fetch failed (exit code ${result.exitCode}):\n${result.stderr}`;
+      }
+
+      return result.stdout || "No content returned.";
+    },
+  };
+}
+
 export function createReadManyFilesTool(): RegisteredTool {
   return {
     definition: {

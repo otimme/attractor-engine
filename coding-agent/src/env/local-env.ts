@@ -109,11 +109,15 @@ export class LocalExecutionEnvironment implements ExecutionEnvironment {
 
     // Use node:child_process with detached to create a process group,
     // so we can kill the entire tree on timeout (not just the shell).
-    const proc = nodeSpawn("bash", ["-c", command], {
+    const isWindows = process.platform === "win32";
+    const shellCmd = isWindows ? "cmd.exe" : "bash";
+    const shellArgs = isWindows ? ["/c", command] : ["-c", command];
+
+    const proc = nodeSpawn(shellCmd, shellArgs, {
       cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
+      detached: !isWindows,
     });
 
     const stdoutChunks: Buffer[] = [];
@@ -123,10 +127,17 @@ export class LocalExecutionEnvironment implements ExecutionEnvironment {
 
     const killProcessGroup = (signal: NodeJS.Signals): void => {
       try {
-        // Negative PID kills the entire process group
-        process.kill(-proc.pid!, signal);
+        if (isWindows) {
+          // Windows: kill the process directly (no process groups)
+          proc.kill(signal);
+        } else {
+          // Unix: negative PID kills the entire process group
+          if (proc.pid !== undefined) {
+            process.kill(-proc.pid, signal);
+          }
+        }
       } catch {
-        // Process group may already be dead
+        // Process may already be dead
       }
     };
 
@@ -156,13 +167,16 @@ export class LocalExecutionEnvironment implements ExecutionEnvironment {
       timeoutPromise.then(() => null),
     ]);
 
+    // If timed out, wait for process to actually exit (bounded by SIGKILL 2s + buffer)
+    if (timedOut) {
+      await Promise.race([
+        exitPromise,
+        new Promise<void>((r) => setTimeout(r, 3000)),
+      ]);
+    }
+
     if (killTimer !== undefined) clearTimeout(killTimer);
     if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
-
-    // If timed out, wait briefly for streams to flush
-    if (timedOut) {
-      await new Promise<void>((r) => setTimeout(r, 100));
-    }
 
     const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
     const stderr = Buffer.concat(stderrChunks).toString("utf-8");
@@ -177,7 +191,12 @@ export class LocalExecutionEnvironment implements ExecutionEnvironment {
     options?: GrepOptions,
   ): Promise<string> {
     const resolvedPath = this.resolvePath(path);
-    const args = ["rg", "--line-number"];
+    const mode = options?.outputMode ?? "content";
+    const modeFlag =
+      mode === "files_with_matches" ? "--files-with-matches" :
+      mode === "count" ? "--count" :
+      "--line-number";
+    const args = ["rg", modeFlag];
 
     if (options?.caseInsensitive) {
       args.push("--ignore-case");

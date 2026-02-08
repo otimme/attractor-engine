@@ -18,7 +18,7 @@ import {
   ProviderError,
 } from "../../types/errors.js";
 import { classifyByMessage } from "../../utils/error-classify.js";
-import { httpRequest, httpRequestStream } from "../../utils/http.js";
+import { httpRequest, httpRequestStream, parseRetryAfterHeader } from "../../utils/http.js";
 import { parseSSE } from "../../utils/sse.js";
 import { str, rec } from "../../utils/extract.js";
 import { translateRequest } from "./request-translator.js";
@@ -36,18 +36,6 @@ export interface AnthropicAdapterOptions {
 
 const ANTHROPIC_API_VERSION = "2023-06-01";
 const DEFAULT_BASE_URL = "https://api.anthropic.com";
-
-function parseRetryAfterHeader(headers: Headers): number | undefined {
-  const value = headers.get("retry-after");
-  if (value === null) {
-    return undefined;
-  }
-  const seconds = Number(value);
-  if (!Number.isNaN(seconds) && seconds > 0) {
-    return seconds;
-  }
-  return undefined;
-}
 
 function mapError(
   status: number,
@@ -128,7 +116,7 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   async complete(request: Request): Promise<Response> {
     const resolved = await resolveFileImages(request);
-    const { body, headers: extraHeaders } = translateRequest(resolved);
+    const { body, headers: extraHeaders, warnings } = translateRequest(resolved);
 
     const useCache = shouldUseCache(request);
     const finalBody = useCache ? injectCacheControl(body) : body;
@@ -149,7 +137,11 @@ export class AnthropicAdapter implements ProviderAdapter {
     });
 
     const responseBody = rec(response.body) ?? {};
-    return translateResponse(responseBody, response.rateLimit);
+    const result = translateResponse(responseBody, response.rateLimit);
+    if (warnings.length > 0) {
+      result.warnings = [...result.warnings, ...warnings];
+    }
+    return result;
   }
 
   async *stream(request: Request): AsyncGenerator<StreamEvent> {
@@ -211,7 +203,8 @@ export class AnthropicAdapter implements ProviderAdapter {
 
 function shouldUseCache(request: Request): boolean {
   const anthropicOptions = request.providerOptions?.["anthropic"];
-  if (anthropicOptions?.["autoCache"] === false) {
+  // Accept both snake_case (spec) and camelCase (legacy)
+  if (anthropicOptions?.["auto_cache"] === false || anthropicOptions?.["autoCache"] === false) {
     return false;
   }
   return true;

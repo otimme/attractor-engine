@@ -33,6 +33,7 @@ function translateUsage(
     inputTokens,
     outputTokens,
     totalTokens: inputTokens + outputTokens,
+    raw: usageData,
   };
 
   const outputDetails = rec(usageData["output_tokens_details"]);
@@ -151,6 +152,17 @@ export async function* translateStream(
         };
         break;
       }
+
+      default:
+        // Emit PROVIDER_EVENT for unrecognized SSE event types
+        if (sse.event) {
+          yield {
+            type: StreamEventType.PROVIDER_EVENT,
+            eventType: sse.event,
+            raw: parsed,
+          };
+        }
+        break;
     }
   }
 }

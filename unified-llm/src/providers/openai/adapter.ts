@@ -18,7 +18,7 @@ import {
   RequestTimeoutError,
 } from "../../types/errors.js";
 import { classifyByMessage } from "../../utils/error-classify.js";
-import { httpRequest, httpRequestStream } from "../../utils/http.js";
+import { httpRequest, httpRequestStream, parseRetryAfterHeader } from "../../utils/http.js";
 import { parseSSE } from "../../utils/sse.js";
 import { str, rec } from "../../utils/extract.js";
 import { translateRequest } from "./request-translator.js";
@@ -59,14 +59,12 @@ function extractErrorCode(body: unknown): string | undefined {
 }
 
 function extractRetryAfter(body: unknown, headers: Headers): number | undefined {
-  // Prefer Retry-After header over body field
-  const headerValue = headers.get("retry-after");
-  if (headerValue !== null) {
-    const seconds = Number(headerValue);
-    if (!Number.isNaN(seconds) && seconds > 0) {
-      return seconds;
-    }
+  // Prefer Retry-After header (supports both numeric seconds and HTTP-date)
+  const fromHeader = parseRetryAfterHeader(headers);
+  if (fromHeader !== undefined) {
+    return fromHeader;
   }
+  // Fall back to body field
   const obj = rec(body);
   if (obj) {
     const errorObj = rec(obj["error"]);
@@ -177,7 +175,7 @@ export class OpenAIAdapter implements ProviderAdapter {
 
   async complete(request: Request): Promise<Response> {
     const resolved = await resolveFileImages(request);
-    const { body, headers: extraHeaders } = translateRequest(resolved, false);
+    const { body, headers: extraHeaders, warnings } = translateRequest(resolved, false);
     const url = `${this.baseUrl}/v1/responses`;
     const timeout = request.timeout ?? this.timeout;
 
@@ -193,7 +191,11 @@ export class OpenAIAdapter implements ProviderAdapter {
     });
 
     const responseBody = rec(httpResponse.body) ?? {};
-    return translateResponse(responseBody, httpResponse.rateLimit);
+    const result = translateResponse(responseBody, httpResponse.rateLimit);
+    if (warnings.length > 0) {
+      result.warnings = [...result.warnings, ...warnings];
+    }
+    return result;
   }
 
   async *stream(request: Request): AsyncGenerator<StreamEvent> {

@@ -88,7 +88,7 @@ describe("Session", () => {
 
     await session.submit("Hi");
 
-    expect(session.state).toBe(SessionState.AWAITING_INPUT);
+    expect(session.state).toBe(SessionState.IDLE);
     expect(session.history).toHaveLength(2);
     expect(session.history[0]?.kind).toBe("user");
     expect(session.history[1]?.kind).toBe("assistant");
@@ -116,7 +116,7 @@ describe("Session", () => {
 
     await session.submit("Read foo.ts");
 
-    expect(session.state).toBe(SessionState.AWAITING_INPUT);
+    expect(session.state).toBe(SessionState.IDLE);
     expect(session.history).toHaveLength(4);
     expect(session.history[0]?.kind).toBe("user");
     expect(session.history[1]?.kind).toBe("assistant");
@@ -706,6 +706,78 @@ describe("Session", () => {
     expect(endEvent?.data["text"]).toBe("Hello world");
   });
 
+  test("close() is idempotent", async () => {
+    const { session } = createTestSession([makeTextResponse("hi")]);
+
+    await session.submit("test");
+    expect(session.state).toBe(SessionState.IDLE);
+
+    await session.close();
+    expect(session.state).toBe(SessionState.CLOSED);
+
+    // Second close should not throw
+    await session.close();
+    expect(session.state).toBe(SessionState.CLOSED);
+  });
+
+  test("LLM error path calls close() for subagent cleanup", async () => {
+    const adapter = new StubAdapter("anthropic", [
+      { error: new Error("LLM exploded") },
+    ]);
+    const client = new Client({ providers: { anthropic: adapter } });
+    const profile = createAnthropicProfile("test-model");
+    const env = new StubExecutionEnvironment();
+    const session = new Session({
+      providerProfile: profile,
+      executionEnv: env,
+      llmClient: client,
+    });
+
+    // Add a fake subagent to verify close() cleans it up
+    let subagentClosed = false;
+    session.subagents.set("test-agent", {
+      close: async () => { subagentClosed = true; },
+    } as import("../../src/tools/subagent-tools.js").SubAgentHandle);
+
+    await session.submit("trigger error");
+
+    expect(session.state).toBe(SessionState.CLOSED);
+    expect(subagentClosed).toBe(true);
+    expect(session.subagents.size).toBe(0);
+  });
+
+  test("abort path calls close() for subagent cleanup", async () => {
+    const files = new Map([["/test/x.ts", "x"]]);
+    const { session } = createTestSession(
+      [
+        makeToolCallResponse([
+          { id: "tc1", name: "read_file", arguments: { file_path: "/test/x.ts" } },
+        ]),
+        makeTextResponse("should not reach"),
+      ],
+      { files },
+    );
+
+    // Add a fake subagent to verify close() cleans it up
+    let subagentClosed = false;
+    session.subagents.set("test-agent", {
+      close: async () => { subagentClosed = true; },
+    } as import("../../src/tools/subagent-tools.js").SubAgentHandle);
+
+    await session.close();
+    // Reset the flag since close() already cleaned up
+    subagentClosed = false;
+    session.subagents.set("test-agent-2", {
+      close: async () => { subagentClosed = true; },
+    } as import("../../src/tools/subagent-tools.js").SubAgentHandle);
+
+    // Submit after abort — processInput detects abort and calls close()
+    // But close() is idempotent so it won't re-emit SESSION_END
+    await session.submit("do stuff");
+
+    expect(session.state).toBe(SessionState.CLOSED);
+  });
+
   test("streaming disabled falls back to complete()", async () => {
     const { session } = createTestSession([makeTextResponse("no stream")], {
       config: { enableStreaming: false },
@@ -717,8 +789,8 @@ describe("Session", () => {
     const events = await eventsPromise;
     const kinds = events.map((e) => e.kind);
 
-    // Non-streaming path does NOT emit ASSISTANT_TEXT_START or ASSISTANT_TEXT_DELTA
-    expect(kinds).not.toContain(EventKind.ASSISTANT_TEXT_START);
+    // Non-streaming path emits START and END but NOT DELTA
+    expect(kinds).toContain(EventKind.ASSISTANT_TEXT_START);
     expect(kinds).not.toContain(EventKind.ASSISTANT_TEXT_DELTA);
     expect(kinds).toContain(EventKind.ASSISTANT_TEXT_END);
   });

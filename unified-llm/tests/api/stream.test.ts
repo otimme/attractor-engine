@@ -4,7 +4,7 @@ import { Client } from "../../src/client/client.js";
 import { StubAdapter } from "../stubs/stub-adapter.js";
 import type { StreamEvent } from "../../src/types/stream-event.js";
 import { StreamEventType } from "../../src/types/stream-event.js";
-import { ServerError, AuthenticationError, RequestTimeoutError } from "../../src/types/errors.js";
+import { ServerError, AuthenticationError, RequestTimeoutError, ConfigurationError, UnsupportedToolChoiceError } from "../../src/types/errors.js";
 
 function makeStreamEvents(text: string): StreamEvent[] {
   return [
@@ -149,7 +149,7 @@ describe("stream", () => {
     });
 
     // Before any iteration, partialResponse should return empty response
-    const partial = result.partialResponse();
+    const partial = result.partialResponse;
     expect(partial.finishReason.reason).toBe("other");
 
     // Consume stream fully
@@ -306,6 +306,128 @@ describe("stream", () => {
     }).toThrow("fail 3");
 
     expect(adapter.calls).toHaveLength(3);
+  });
+
+  test("stopWhen emits FINISH event before stopping", async () => {
+    const toolCallEvents: StreamEvent[] = [
+      { type: StreamEventType.STREAM_START, model: "test-model" },
+      {
+        type: StreamEventType.TOOL_CALL_START,
+        toolCallId: "tc-1",
+        toolName: "my_tool",
+      },
+      {
+        type: StreamEventType.TOOL_CALL_DELTA,
+        toolCallId: "tc-1",
+        argumentsDelta: "{}",
+      },
+      {
+        type: StreamEventType.TOOL_CALL_END,
+        toolCallId: "tc-1",
+      },
+      {
+        type: StreamEventType.FINISH,
+        finishReason: { reason: "tool_calls" },
+        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      },
+    ];
+
+    const adapter = new StubAdapter("stub", [
+      { events: toolCallEvents },
+      { events: toolCallEvents },
+    ]);
+    const client = makeClient(adapter);
+
+    const result = stream({
+      model: "test-model",
+      prompt: "do stuff",
+      tools: [
+        {
+          name: "my_tool",
+          description: "A tool",
+          parameters: {},
+          execute: async () => "ok",
+        },
+      ],
+      maxToolRounds: 5,
+      stopWhen: (steps) => steps.length >= 1,
+      client,
+    });
+
+    const collected: StreamEvent[] = [];
+    for await (const event of result) {
+      collected.push(event);
+    }
+
+    // Should have a FINISH event emitted by the stopWhen path
+    const finishEvents = collected.filter((e) => e.type === StreamEventType.FINISH);
+    expect(finishEvents.length).toBeGreaterThanOrEqual(1);
+    const lastFinish = finishEvents[finishEvents.length - 1];
+    if (lastFinish?.type === StreamEventType.FINISH) {
+      expect(lastFinish.response).toBeDefined();
+    }
+  });
+
+  test("rejects tool parameters without root type object", () => {
+    const adapter = new StubAdapter("stub", []);
+    const client = makeClient(adapter);
+
+    expect(() =>
+      stream({
+        model: "test-model",
+        prompt: "hello",
+        tools: [
+          {
+            name: "bad_tool",
+            description: "Bad params",
+            parameters: { type: "array", items: { type: "string" } },
+          },
+        ],
+        client,
+      }),
+    ).toThrow(ConfigurationError);
+  });
+
+  test("throws UnsupportedToolChoiceError when adapter rejects mode", () => {
+    const adapter = new StubAdapter("stub", []);
+    adapter.supportsToolChoice = (mode: string) => mode !== "required";
+    const client = makeClient(adapter);
+
+    expect(() =>
+      stream({
+        model: "test-model",
+        prompt: "hello",
+        tools: [
+          {
+            name: "my_tool",
+            description: "A tool",
+            parameters: { type: "object" },
+          },
+        ],
+        toolChoice: { mode: "required" },
+        client,
+      }),
+    ).toThrow(UnsupportedToolChoiceError);
+  });
+
+  test("abortSignal is passed to adapter request", async () => {
+    const events = makeStreamEvents("Hello");
+    const adapter = new StubAdapter("stub", [{ events }]);
+    const client = makeClient(adapter);
+
+    const controller = new AbortController();
+    const result = stream({
+      model: "test-model",
+      prompt: "hello",
+      abortSignal: controller.signal,
+      client,
+    });
+
+    for await (const _event of result) {
+      // consume
+    }
+
+    expect(adapter.calls[0]?.abortSignal).toBe(controller.signal);
   });
 
   test("total timeout throws RequestTimeoutError", async () => {

@@ -19,6 +19,18 @@ export class RecordingInterviewer implements Interviewer {
     return answer;
   }
 
+  async askMultiple(questions: Question[]): Promise<Answer[]> {
+    const answers = await this.inner.askMultiple(questions);
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const a = answers[i];
+      if (q !== undefined && a !== undefined) {
+        this.recordings.push({ question: q, answer: a });
+      }
+    }
+    return answers;
+  }
+
   inform(message: string, stage: string): Promise<void> {
     return this.inner.inform(message, stage);
   }

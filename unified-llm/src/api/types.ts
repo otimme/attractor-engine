@@ -36,6 +36,6 @@ export type StopCondition = (steps: StepResult[]) => boolean;
 export interface StreamResult {
   [Symbol.asyncIterator](): AsyncIterator<StreamEvent>;
   response(): Promise<Response>;
-  partialResponse(): Response;
+  readonly partialResponse: Response;
   readonly textStream: AsyncGenerator<string>;
 }

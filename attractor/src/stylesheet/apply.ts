@@ -10,6 +10,10 @@ function nodeMatchesSelector(node: Node, rule: StylesheetRule): boolean {
   switch (selector.kind) {
     case "universal":
       return true;
+    case "shape": {
+      const shapeAttr = getStringAttr(node.attributes, "shape");
+      return shapeAttr === selector.value;
+    }
     case "id":
       return node.id === selector.value;
     case "class": {

@@ -3,7 +3,7 @@ import type { Request } from "../types/request.js";
 import type { Response } from "../types/response.js";
 import type { StreamEvent } from "../types/stream-event.js";
 import { ConfigurationError } from "../types/errors.js";
-import type { Middleware, StreamMiddleware } from "./middleware.js";
+import type { Middleware } from "./middleware.js";
 import { getLatestModel } from "../models/catalog.js";
 import {
   buildMiddlewareChain,
@@ -18,14 +18,12 @@ export interface ClientOptions {
   providers?: Record<string, ProviderAdapter>;
   defaultProvider?: string;
   middleware?: Middleware[];
-  streamMiddleware?: StreamMiddleware[];
 }
 
 export class Client {
   private providers: Map<string, ProviderAdapter>;
   private defaultProvider: string | undefined;
   private middleware: Middleware[];
-  private streamMiddleware: StreamMiddleware[];
 
   constructor(options: ClientOptions = {}) {
     this.providers = new Map();
@@ -36,7 +34,6 @@ export class Client {
     }
     this.defaultProvider = options.defaultProvider;
     this.middleware = options.middleware ?? [];
-    this.streamMiddleware = options.streamMiddleware ?? [];
   }
 
   resolveProvider(providerName?: string): ProviderAdapter {
@@ -81,7 +78,7 @@ export class Client {
     const baseHandler = (req: Request): AsyncGenerator<StreamEvent> =>
       adapter.stream(req);
     const chain = buildStreamMiddlewareChain(
-      this.streamMiddleware,
+      this.middleware,
       baseHandler,
     );
     yield* chain(resolved);
@@ -161,12 +158,6 @@ export class Client {
           baseUrl: compatBaseUrl,
           apiKey: process.env["OPENAI_COMPATIBLE_API_KEY"],
         }),
-      );
-    }
-
-    if (client.providers.size === 0) {
-      throw new ConfigurationError(
-        "No LLM provider configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or OPENAI_COMPATIBLE_BASE_URL environment variable.",
       );
     }
 

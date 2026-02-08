@@ -88,7 +88,7 @@ describe("Anthropic real API", () => {
       );
       await eventCollector;
 
-      expect(session.state).toBe(SessionState.AWAITING_INPUT);
+      expect(session.state).toBe(SessionState.IDLE);
 
       // Verify file was created
       const fileExists = await env.fileExists(join(tempDir, "hello.txt"));
@@ -161,7 +161,7 @@ describe("Anthropic real API", () => {
       );
       await eventCollector;
 
-      expect(session.state).toBe(SessionState.AWAITING_INPUT);
+      expect(session.state).toBe(SessionState.IDLE);
 
       const content = await Bun.file(join(tempDir, "greet.py")).text();
       expect(content).toContain("goodbye");
@@ -209,7 +209,7 @@ describe("Anthropic real API", () => {
       );
       await eventCollector;
 
-      expect(session.state).toBe(SessionState.AWAITING_INPUT);
+      expect(session.state).toBe(SessionState.IDLE);
 
       const toolEnds = events.filter(
         (e) => e.kind === EventKind.TOOL_CALL_END,
@@ -271,7 +271,7 @@ describe("OpenAI real API", () => {
       );
       await eventCollector;
 
-      expect(session.state).toBe(SessionState.AWAITING_INPUT);
+      expect(session.state).toBe(SessionState.IDLE);
 
       const fileExists = await env.fileExists(join(tempDir, "hello.txt"));
       expect(fileExists).toBe(true);
@@ -322,7 +322,7 @@ describe("OpenAI real API", () => {
       );
       await eventCollector;
 
-      expect(session.state).toBe(SessionState.AWAITING_INPUT);
+      expect(session.state).toBe(SessionState.IDLE);
 
       const toolStarts = events.filter(
         (e) => e.kind === EventKind.TOOL_CALL_START,
@@ -384,7 +384,7 @@ describe("OpenAI real API", () => {
       );
       await eventCollector;
 
-      expect(session.state).toBe(SessionState.AWAITING_INPUT);
+      expect(session.state).toBe(SessionState.IDLE);
 
       const toolEnds = events.filter(
         (e) => e.kind === EventKind.TOOL_CALL_END,

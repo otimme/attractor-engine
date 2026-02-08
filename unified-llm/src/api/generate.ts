@@ -6,7 +6,7 @@ import type { Request } from "../types/request.js";
 import type { Response, Usage } from "../types/response.js";
 import { addUsage, responseText, responseToolCalls, responseReasoning } from "../types/response.js";
 import type { TimeoutConfig, AdapterTimeout } from "../types/timeout.js";
-import { ConfigurationError, RequestTimeoutError } from "../types/errors.js";
+import { ConfigurationError, RequestTimeoutError, UnsupportedToolChoiceError, InvalidToolCallError } from "../types/errors.js";
 import { validateToolName } from "../utils/validate-tool-name.js";
 import { validateJsonSchema } from "../utils/validate-json-schema.js";
 import { retry } from "../utils/retry.js";
@@ -20,11 +20,11 @@ export type { ToolExecutionContext } from "../types/tool.js";
 function toAdapterTimeout(timeout: number | TimeoutConfig, remainingMs?: number): AdapterTimeout {
   if (typeof timeout === "number") {
     const requestMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
-    return { connect: 10_000, request: requestMs, streamRead: requestMs };
+    return { request: requestMs, streamRead: 30_000 };
   }
   const requestMs = timeout.perStep ?? timeout.total ?? 120_000;
   const clamped = remainingMs != null ? Math.min(requestMs, remainingMs) : requestMs;
-  return { connect: 10_000, request: clamped, streamRead: clamped };
+  return { request: clamped, streamRead: 30_000 };
 }
 
 export interface GenerateOptions {
@@ -93,12 +93,27 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     throw new ConfigurationError("Cannot specify both 'prompt' and 'messages'");
   }
 
+  const client = options.client ?? getDefaultClient();
+
   if (options.tools) {
     for (const tool of options.tools) {
       const nameError = validateToolName(tool.name);
       if (nameError) {
         throw new ConfigurationError(`Invalid tool name "${tool.name}": ${nameError}`);
       }
+      const params = tool.parameters;
+      if (Object.keys(params).length > 0 && params["type"] !== "object") {
+        throw new ConfigurationError(
+          `Tool "${tool.name}" parameters must have "type": "object" at the root`,
+        );
+      }
+    }
+  }
+
+  if (options.toolChoice) {
+    const adapter = client.resolveProvider(options.provider);
+    if (adapter.supportsToolChoice && !adapter.supportsToolChoice(options.toolChoice.mode)) {
+      throw new UnsupportedToolChoiceError(adapter.name, options.toolChoice.mode);
     }
   }
 
@@ -114,7 +129,6 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
   const maxToolRounds = options.maxToolRounds ?? 1;
   const maxRetries = options.maxRetries ?? 2;
-  const client = options.client ?? getDefaultClient();
 
   const policy: RetryPolicy = options.retryPolicy ?? {
     maxRetries,
@@ -192,7 +206,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
           if (toolDef.parameters && Object.keys(toolDef.parameters).length > 0) {
             const validation = validateJsonSchema(args, toolDef.parameters);
             if (!validation.valid) {
-              const validationError = new Error(`Tool argument validation failed: ${validation.errors}`);
+              const validationError = new InvalidToolCallError(`Tool argument validation failed: ${validation.errors}`);
 
               // Try repair if provided
               if (options.repairToolCall) {

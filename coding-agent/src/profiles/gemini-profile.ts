@@ -13,6 +13,8 @@ import {
 import {
   createListDirTool,
   createReadManyFilesTool,
+  createWebSearchTool,
+  createWebFetchTool,
 } from "../tools/gemini-tools.js";
 import type { SessionFactory, SubAgentDepthConfig } from "../tools/subagent-tools.js";
 import {
@@ -43,6 +45,8 @@ export function createGeminiProfile(
   registry.register(createGlobTool());
   registry.register(createListDirTool());
   registry.register(createReadManyFilesTool());
+  registry.register(createWebSearchTool());
+  registry.register(createWebFetchTool());
 
   if (options?.sessionFactory) {
     const agents = new Map<string, SubAgentHandle>();
@@ -95,7 +99,7 @@ export function createGeminiProfile(
       };
     },
 
-    supportsReasoning: false,
+    supportsReasoning: true,
     supportsStreaming: true,
     supportsParallelToolCalls: true,
     contextWindowSize: 1_000_000,

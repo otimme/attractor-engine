@@ -66,6 +66,14 @@ export class ConsoleInterviewer implements Interviewer {
     }
   }
 
+  async askMultiple(questions: Question[]): Promise<Answer[]> {
+    const answers: Answer[] = [];
+    for (const q of questions) {
+      answers.push(await this.ask(q));
+    }
+    return answers;
+  }
+
   async inform(message: string, stage: string): Promise<void> {
     this.log(`[${stage}] ${message}`);
   }
@@ -172,6 +180,13 @@ export function withTimeout(interviewer: ConsoleInterviewer): Interviewer {
         }
         throw err;
       }
+    },
+    async askMultiple(questions: Question[]): Promise<Answer[]> {
+      const answers: Answer[] = [];
+      for (const q of questions) {
+        answers.push(await this.ask(q));
+      }
+      return answers;
     },
     async inform(message: string, stage: string): Promise<void> {
       return interviewer.inform(message, stage);

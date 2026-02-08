@@ -226,6 +226,13 @@ describe("RecordingInterviewer", () => {
     let informCalled = false;
     const inner: import("../../src/types/index.js").Interviewer = {
       ask: async (_q) => createAnswer({ value: AnswerValue.YES }),
+      async askMultiple(questions) {
+        const answers: Answer[] = [];
+        for (const q of questions) {
+          answers.push(await this.ask(q));
+        }
+        return answers;
+      },
       inform: async (_msg, _stage) => {
         informCalled = true;
       },

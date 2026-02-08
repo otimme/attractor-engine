@@ -39,6 +39,7 @@ export interface Answer {
 
 export interface Interviewer {
   ask(question: Question): Promise<Answer>;
+  askMultiple(questions: Question[]): Promise<Answer[]>;
   inform(message: string, stage: string): Promise<void>;
 }
 

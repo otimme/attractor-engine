@@ -16,6 +16,7 @@ export interface GrepOptions {
   caseInsensitive?: boolean;
   globFilter?: string;
   maxResults?: number;
+  outputMode?: "content" | "files_with_matches" | "count";
 }
 
 export interface ExecutionEnvironment {

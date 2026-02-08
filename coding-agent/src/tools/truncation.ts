@@ -74,10 +74,11 @@ export function truncateLines(output: string, maxLines: number): string {
     return output;
   }
 
-  const halfBudget = Math.floor(maxLines / 2);
-  const headLines = lines.slice(0, halfBudget);
-  const tailLines = lines.slice(lines.length - halfBudget);
-  const omitted = lines.length - halfBudget * 2;
+  const headCount = Math.floor(maxLines / 2);
+  const tailCount = maxLines - headCount;
+  const headLines = lines.slice(0, headCount);
+  const tailLines = lines.slice(lines.length - tailCount);
+  const omitted = lines.length - headCount - tailCount;
   const marker = `\n[... ${omitted} lines omitted ...]\n`;
   return headLines.join("\n") + marker + tailLines.join("\n");
 }

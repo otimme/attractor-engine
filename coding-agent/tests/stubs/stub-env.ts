@@ -92,8 +92,10 @@ export class StubExecutionEnvironment implements ExecutionEnvironment {
   ): Promise<string> {
     const flags = options?.caseInsensitive ? "i" : "";
     const regex = new RegExp(pattern, flags);
-    const matches: string[] = [];
+    const mode = options?.outputMode ?? "content";
     const maxResults = options?.maxResults ?? Infinity;
+    const matches: string[] = [];
+    const fileCounts = new Map<string, number>();
 
     for (const [filePath, content] of this.files) {
       if (!filePath.startsWith(path)) continue;
@@ -102,14 +104,34 @@ export class StubExecutionEnvironment implements ExecutionEnvironment {
         if (!filePath.endsWith(globSuffix)) continue;
       }
       const lines = content.split("\n");
+      let fileMatchCount = 0;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         if (line !== undefined && regex.test(line)) {
-          matches.push(`${filePath}:${i + 1}:${line}`);
-          if (matches.length >= maxResults) return matches.join("\n");
+          fileMatchCount++;
+          if (mode === "content") {
+            matches.push(`${filePath}:${i + 1}:${line}`);
+            if (matches.length >= maxResults) return matches.join("\n");
+          }
+          if (mode === "files_with_matches") {
+            matches.push(filePath);
+            break; // one entry per file
+          }
         }
       }
+      if (mode === "count" && fileMatchCount > 0) {
+        fileCounts.set(filePath, fileMatchCount);
+      }
     }
+
+    if (mode === "count") {
+      const countLines: string[] = [];
+      for (const [filePath, count] of fileCounts) {
+        countLines.push(`${filePath}:${count}`);
+      }
+      return countLines.join("\n");
+    }
+
     return matches.join("\n");
   }
 

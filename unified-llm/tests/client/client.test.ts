@@ -94,18 +94,22 @@ describe("Client", () => {
 
     const log: string[] = [];
 
-    const mw1: Middleware = async (req, next) => {
-      log.push("mw1-req");
-      const res = await next(req);
-      log.push("mw1-res");
-      return res;
+    const mw1: Middleware = {
+      complete: async (req, next) => {
+        log.push("mw1-req");
+        const res = await next(req);
+        log.push("mw1-res");
+        return res;
+      },
     };
 
-    const mw2: Middleware = async (req, next) => {
-      log.push("mw2-req");
-      const res = await next(req);
-      log.push("mw2-res");
-      return { ...res, id: "modified" };
+    const mw2: Middleware = {
+      complete: async (req, next) => {
+        log.push("mw2-req");
+        const res = await next(req);
+        log.push("mw2-res");
+        return { ...res, id: "modified" };
+      },
     };
 
     const client = new Client({
@@ -194,6 +198,82 @@ describe("Client", () => {
 
     const resolved = client.resolveProvider("my-provider");
     expect(resolved.name).toBe("my-provider");
+  });
+
+  test("fromEnvSync creates client with anthropic when ANTHROPIC_API_KEY set", () => {
+    const original = process.env["ANTHROPIC_API_KEY"];
+    const originalOpenAI = process.env["OPENAI_API_KEY"];
+    const originalGemini = process.env["GEMINI_API_KEY"];
+    const originalGoogle = process.env["GOOGLE_API_KEY"];
+    const originalCompat = process.env["OPENAI_COMPATIBLE_BASE_URL"];
+    try {
+      process.env["ANTHROPIC_API_KEY"] = "test-key";
+      delete process.env["OPENAI_API_KEY"];
+      delete process.env["GEMINI_API_KEY"];
+      delete process.env["GOOGLE_API_KEY"];
+      delete process.env["OPENAI_COMPATIBLE_BASE_URL"];
+
+      const client = Client.fromEnvSync();
+      const adapter = client.resolveProvider("anthropic");
+      expect(adapter.name).toBe("anthropic");
+    } finally {
+      if (original !== undefined) process.env["ANTHROPIC_API_KEY"] = original;
+      else delete process.env["ANTHROPIC_API_KEY"];
+      if (originalOpenAI !== undefined) process.env["OPENAI_API_KEY"] = originalOpenAI;
+      else delete process.env["OPENAI_API_KEY"];
+      if (originalGemini !== undefined) process.env["GEMINI_API_KEY"] = originalGemini;
+      else delete process.env["GEMINI_API_KEY"];
+      if (originalGoogle !== undefined) process.env["GOOGLE_API_KEY"] = originalGoogle;
+      else delete process.env["GOOGLE_API_KEY"];
+      if (originalCompat !== undefined) process.env["OPENAI_COMPATIBLE_BASE_URL"] = originalCompat;
+      else delete process.env["OPENAI_COMPATIBLE_BASE_URL"];
+    }
+  });
+
+  test("fromEnvSync returns empty client when no env vars set", () => {
+    const saved: Record<string, string | undefined> = {};
+    const keys = [
+      "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
+      "GOOGLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL",
+    ];
+    try {
+      for (const key of keys) {
+        saved[key] = process.env[key];
+        delete process.env[key];
+      }
+
+      const client = Client.fromEnvSync();
+      expect(() => client.resolveProvider()).toThrow(ConfigurationError);
+    } finally {
+      for (const key of keys) {
+        if (saved[key] !== undefined) process.env[key] = saved[key];
+        else delete process.env[key];
+      }
+    }
+  });
+
+  test("fromEnv returns a promise that resolves to a client", async () => {
+    const saved: Record<string, string | undefined> = {};
+    const keys = [
+      "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
+      "GOOGLE_API_KEY", "OPENAI_COMPATIBLE_BASE_URL",
+    ];
+    try {
+      for (const key of keys) {
+        saved[key] = process.env[key];
+        delete process.env[key];
+      }
+      process.env["ANTHROPIC_API_KEY"] = "test-key";
+
+      const client = await Client.fromEnv();
+      const adapter = client.resolveProvider("anthropic");
+      expect(adapter.name).toBe("anthropic");
+    } finally {
+      for (const key of keys) {
+        if (saved[key] !== undefined) process.env[key] = saved[key];
+        else delete process.env[key];
+      }
+    }
   });
 
   test("close calls close on all adapters", async () => {

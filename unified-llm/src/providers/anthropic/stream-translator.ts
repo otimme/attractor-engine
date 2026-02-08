@@ -21,6 +21,7 @@ export async function* translateStream(
   let messageId: string | undefined;
   let finishReason = "stop";
   let reasoningTextLength = 0;
+  let rawUsage: Record<string, unknown> = {};
 
   for await (const event of events) {
     if (event.data === "[DONE]") {
@@ -49,6 +50,7 @@ export async function* translateStream(
             inputTokens = num(usage["input_tokens"]);
             cacheReadTokens = optNum(usage["cache_read_input_tokens"]);
             cacheWriteTokens = optNum(usage["cache_creation_input_tokens"]);
+            rawUsage = { ...rawUsage, ...usage };
           }
         }
         yield { type: StreamEventType.STREAM_START, id: messageId, model };
@@ -140,8 +142,11 @@ export async function* translateStream(
           finishReason = delta["stop_reason"];
         }
         const usage = rec(parsed["usage"]);
-        if (usage && typeof usage["output_tokens"] === "number") {
-          outputTokens = usage["output_tokens"];
+        if (usage) {
+          if (typeof usage["output_tokens"] === "number") {
+            outputTokens = usage["output_tokens"];
+          }
+          rawUsage = { ...rawUsage, ...usage };
         }
         break;
       }
@@ -155,6 +160,7 @@ export async function* translateStream(
           reasoningTokens: reasoningTextLength > 0 ? Math.ceil(reasoningTextLength / 4) : undefined,
           cacheReadTokens,
           cacheWriteTokens,
+          raw: rawUsage,
         };
         yield {
           type: StreamEventType.FINISH,
@@ -175,6 +181,17 @@ export async function* translateStream(
         };
         break;
       }
+
+      default:
+        // Emit PROVIDER_EVENT for unrecognized event types
+        if (eventType) {
+          yield {
+            type: StreamEventType.PROVIDER_EVENT,
+            eventType,
+            raw: parsed,
+          };
+        }
+        break;
     }
   }
 }

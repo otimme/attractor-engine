@@ -126,6 +126,19 @@ export function isThinkingPart(part: ContentPart): part is ThinkingPart {
   return part.kind === "thinking";
 }
 
+export const ContentKind = {
+  TEXT: "text",
+  IMAGE: "image",
+  AUDIO: "audio",
+  DOCUMENT: "document",
+  TOOL_CALL: "tool_call",
+  TOOL_RESULT: "tool_result",
+  THINKING: "thinking",
+  REDACTED_THINKING: "redacted_thinking",
+} as const;
+
+export type ContentKind = (typeof ContentKind)[keyof typeof ContentKind];
+
 export function isRedactedThinkingPart(
   part: ContentPart,
 ): part is RedactedThinkingPart {

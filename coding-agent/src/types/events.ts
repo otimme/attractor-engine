@@ -6,11 +6,22 @@ export const EventKind = {
   ASSISTANT_TEXT_DELTA: "assistant_text_delta",
   ASSISTANT_TEXT_END: "assistant_text_end",
   TOOL_CALL_START: "tool_call_start",
+  /**
+   * Intentionally deferred. Defined for future streaming tool output support.
+   * No tools currently produce incremental output. Full implementation requires:
+   * (1) adding an event callback to tool executor signatures,
+   * (2) shell tool streaming stdout chunks,
+   * (3) session.ts forwarding delta events during execution.
+   */
   TOOL_CALL_OUTPUT_DELTA: "tool_call_output_delta",
   TOOL_CALL_END: "tool_call_end",
   STEERING_INJECTED: "steering_injected",
   TURN_LIMIT: "turn_limit",
   LOOP_DETECTION: "loop_detection",
+  /**
+   * Spec extension: not listed in spec section 2.9's EventKind enum.
+   * Added to support context window awareness per spec section 5.5.
+   */
   WARNING: "warning",
   ERROR: "error",
 } as const;

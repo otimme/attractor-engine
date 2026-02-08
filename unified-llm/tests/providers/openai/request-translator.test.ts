@@ -605,4 +605,82 @@ describe("OpenAI Request Translator", () => {
     const { body } = translateRequest(request, false);
     expect(body.stop).toEqual(["END", "STOP"]);
   });
+
+  test("enforceStrictSchema recurses into array items with object schema", () => {
+    const request = makeRequest({
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Hi" }] },
+      ],
+      tools: [
+        {
+          name: "create_users",
+          description: "Create users",
+          parameters: {
+            type: "object",
+            properties: {
+              users: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    age: { type: "number" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const { body } = translateRequest(request, false);
+    const tools = body.tools as Array<Record<string, unknown>>;
+    const params = tools[0]?.parameters as Record<string, unknown>;
+    const props = params?.properties as Record<string, Record<string, unknown>>;
+    const users = props?.users as Record<string, unknown>;
+    const items = users?.items as Record<string, unknown>;
+
+    expect(items?.additionalProperties).toBe(false);
+    expect(items?.required).toEqual(["name", "age"]);
+  });
+
+  test("emits warning when audio content parts are dropped", () => {
+    const request = makeRequest({
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "text", text: "Listen" },
+            { kind: "audio", audio: { url: "https://example.com/audio.mp3" } },
+          ],
+        },
+      ],
+    });
+
+    const { warnings } = translateRequest(request, false);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.code).toBe("unsupported_part");
+    expect(warnings[0]?.message).toContain("Audio");
+  });
+
+  test("emits warning when document content parts are dropped", () => {
+    const request = makeRequest({
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "document", document: { url: "https://example.com/doc.pdf" } },
+          ],
+        },
+      ],
+    });
+
+    const { warnings } = translateRequest(request, false);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.code).toBe("unsupported_part");
+    expect(warnings[0]?.message).toContain("Document");
+  });
 });

@@ -30,6 +30,14 @@ export class AutoApproveInterviewer implements Interviewer {
     );
   }
 
+  async askMultiple(questions: Question[]): Promise<Answer[]> {
+    const answers: Answer[] = [];
+    for (const q of questions) {
+      answers.push(await this.ask(q));
+    }
+    return answers;
+  }
+
   inform(_message: string, _stage: string): Promise<void> {
     return Promise.resolve();
   }

@@ -5,11 +5,13 @@ import type { StreamEvent } from "../types/stream-event.js";
 export type NextFn = (request: Request) => Promise<Response>;
 export type StreamNextFn = (request: Request) => AsyncGenerator<StreamEvent>;
 
-export type Middleware = (request: Request, next: NextFn) => Promise<Response>;
-export type StreamMiddleware = (
-  request: Request,
-  next: StreamNextFn,
-) => AsyncGenerator<StreamEvent>;
+export interface Middleware {
+  complete?: (request: Request, next: NextFn) => Promise<Response>;
+  stream?: (
+    request: Request,
+    next: StreamNextFn,
+  ) => AsyncGenerator<StreamEvent>;
+}
 
 export function buildMiddlewareChain(
   middlewares: Middleware[],
@@ -17,20 +19,26 @@ export function buildMiddlewareChain(
 ): NextFn {
   let chain = handler;
   for (const mw of [...middlewares].reverse()) {
-    const next = chain;
-    chain = (request) => mw(request, next);
+    if (mw.complete) {
+      const next = chain;
+      const completeFn = mw.complete;
+      chain = (request) => completeFn(request, next);
+    }
   }
   return chain;
 }
 
 export function buildStreamMiddlewareChain(
-  middlewares: StreamMiddleware[],
+  middlewares: Middleware[],
   handler: StreamNextFn,
 ): StreamNextFn {
   let chain = handler;
   for (const mw of [...middlewares].reverse()) {
-    const next = chain;
-    chain = (request) => mw(request, next);
+    if (mw.stream) {
+      const next = chain;
+      const streamFn = mw.stream;
+      chain = (request) => streamFn(request, next);
+    }
   }
   return chain;
 }

@@ -238,6 +238,57 @@ describe("Gemini stream translator", () => {
     expect(events[0]?.type).toBe(StreamEventType.STREAM_START);
   });
 
+  test("emits PROVIDER_EVENT for non-message SSE events", async () => {
+    const sseEvents: SSEEvent[] = [
+      { event: "custom_event", data: "some payload" },
+      makeSSE({
+        candidates: [
+          {
+            content: { parts: [{ text: "OK" }], role: "model" },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+        modelVersion: "gemini-3-pro-preview",
+      }),
+    ];
+
+    const events = await collectEvents(sseEvents);
+
+    expect(events[0]?.type).toBe(StreamEventType.PROVIDER_EVENT);
+    if (events[0]?.type === StreamEventType.PROVIDER_EVENT) {
+      expect(events[0].eventType).toBe("custom_event");
+      expect(events[0].raw).toBe("some payload");
+    }
+  });
+
+  test("includes raw usage data in FINISH event", async () => {
+    const usageMetadata = {
+      promptTokenCount: 10,
+      candidatesTokenCount: 5,
+    };
+    const sseEvents: SSEEvent[] = [
+      makeSSE({
+        candidates: [
+          {
+            content: { parts: [{ text: "Hello" }], role: "model" },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata,
+        modelVersion: "gemini-3-pro-preview",
+      }),
+    ];
+
+    const events = await collectEvents(sseEvents);
+    const finish = events.at(-1);
+
+    expect(finish?.type).toBe(StreamEventType.FINISH);
+    if (finish?.type === StreamEventType.FINISH) {
+      expect(finish.usage?.raw).toEqual(usageMetadata);
+    }
+  });
+
   test("translates thinking blocks in stream", async () => {
     const sseEvents: SSEEvent[] = [
       makeSSE({

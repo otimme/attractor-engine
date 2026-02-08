@@ -31,6 +31,7 @@ export interface OpenAICompatibleAdapterOptions {
   apiKey?: string;
   defaultHeaders?: Record<string, string>;
   timeout?: AdapterTimeout;
+  supportsNativeJsonSchema?: boolean;
 }
 
 function extractErrorMessage(body: unknown): string {
@@ -136,7 +137,7 @@ function mapError(
 
 export class OpenAICompatibleAdapter implements ProviderAdapter {
   readonly name = "openai-compatible";
-  readonly supportsNativeJsonSchema = true;
+  readonly supportsNativeJsonSchema: boolean;
   private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
   private readonly defaultHeaders: Record<string, string>;
@@ -147,6 +148,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     this.apiKey = options.apiKey;
     this.defaultHeaders = options.defaultHeaders ?? {};
     this.timeout = options.timeout;
+    this.supportsNativeJsonSchema = options.supportsNativeJsonSchema ?? false;
   }
 
   private buildHeaders(
@@ -167,7 +169,7 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
 
   async complete(request: Request): Promise<Response> {
     const resolved = await resolveFileImages(request);
-    const { body, headers: extraHeaders } = translateRequest(resolved, false);
+    const { body, headers: extraHeaders, warnings } = translateRequest(resolved, false);
     const url = `${this.baseUrl}/v1/chat/completions`;
     const timeout = request.timeout ?? this.timeout;
 
@@ -183,7 +185,9 @@ export class OpenAICompatibleAdapter implements ProviderAdapter {
     });
 
     const responseBody = rec(httpResponse.body) ?? {};
-    return translateResponse(responseBody, httpResponse.rateLimit);
+    const result = translateResponse(responseBody, httpResponse.rateLimit);
+    result.warnings = [...result.warnings, ...warnings];
+    return result;
   }
 
   async *stream(request: Request): AsyncGenerator<StreamEvent> {

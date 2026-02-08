@@ -31,6 +31,11 @@ export function buildRetryPolicy(node: Node, graph: Graph): RetryPolicy {
   };
 }
 
+export interface RetryResult {
+  outcome: Outcome;
+  attempts: number;
+}
+
 /**
  * Execute a handler with retry logic per spec 3.5.
  */
@@ -41,7 +46,7 @@ export async function executeWithRetry(
   logsRoot: string,
   handler: Handler,
   retryPolicy: RetryPolicy,
-): Promise<Outcome> {
+): Promise<RetryResult> {
   for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt++) {
     let outcome: Outcome;
 
@@ -57,10 +62,13 @@ export async function executeWithRetry(
         await sleep(delay);
         continue;
       }
-      return createOutcome({
-        status: StageStatus.FAIL,
-        failureReason: err.message,
-      });
+      return {
+        outcome: createOutcome({
+          status: StageStatus.FAIL,
+          failureReason: err.message,
+        }),
+        attempts: attempt,
+      };
     }
 
     // SUCCESS or PARTIAL_SUCCESS -> return immediately
@@ -68,7 +76,7 @@ export async function executeWithRetry(
       outcome.status === StageStatus.SUCCESS ||
       outcome.status === StageStatus.PARTIAL_SUCCESS
     ) {
-      return outcome;
+      return { outcome, attempts: attempt };
     }
 
     // RETRY -> backoff and retry if within limits
@@ -85,30 +93,39 @@ export async function executeWithRetry(
       // Retries exhausted
       const allowPartial = getBooleanAttr(node.attributes, "allow_partial", false);
       if (allowPartial) {
-        return createOutcome({
-          status: StageStatus.PARTIAL_SUCCESS,
-          notes: "retries exhausted, partial accepted",
-        });
+        return {
+          outcome: createOutcome({
+            status: StageStatus.PARTIAL_SUCCESS,
+            notes: "retries exhausted, partial accepted",
+          }),
+          attempts: attempt,
+        };
       }
-      return createOutcome({
-        status: StageStatus.FAIL,
-        failureReason: "max retries exceeded",
-      });
+      return {
+        outcome: createOutcome({
+          status: StageStatus.FAIL,
+          failureReason: "max retries exceeded",
+        }),
+        attempts: attempt,
+      };
     }
 
     // FAIL -> return immediately
     if (outcome.status === StageStatus.FAIL) {
-      return outcome;
+      return { outcome, attempts: attempt };
     }
 
     // Any other status (SKIPPED etc) -> return as-is
-    return outcome;
+    return { outcome, attempts: attempt };
   }
 
-  return createOutcome({
-    status: StageStatus.FAIL,
-    failureReason: "max retries exceeded",
-  });
+  return {
+    outcome: createOutcome({
+      status: StageStatus.FAIL,
+      failureReason: "max retries exceeded",
+    }),
+    attempts: retryPolicy.maxAttempts,
+  };
 }
 
 function sleep(ms: number): Promise<void> {

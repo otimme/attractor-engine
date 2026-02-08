@@ -259,4 +259,56 @@ describe("OpenAI Stream Translator", () => {
       expect(start.id).toBe("resp_abc");
     }
   });
+
+  test("emits PROVIDER_EVENT for unrecognized SSE event types", async () => {
+    const sseEvents: SSEEvent[] = [
+      {
+        event: "response.custom_event",
+        data: JSON.stringify({ some: "data" }),
+      },
+    ];
+
+    const events = await collectEvents(
+      translateStream(makeSSEStream(sseEvents)),
+    );
+
+    expect(events).toHaveLength(1);
+    const providerEvent = events[0];
+    expect(providerEvent?.type).toBe(StreamEventType.PROVIDER_EVENT);
+    if (providerEvent?.type === StreamEventType.PROVIDER_EVENT) {
+      expect(providerEvent.eventType).toBe("response.custom_event");
+    }
+  });
+
+  test("includes raw usage data on FINISH event", async () => {
+    const sseEvents: SSEEvent[] = [
+      {
+        event: "response.completed",
+        data: JSON.stringify({
+          response: {
+            status: "completed",
+            output: [],
+            usage: {
+              input_tokens: 15,
+              output_tokens: 25,
+              output_tokens_details: { reasoning_tokens: 5 },
+            },
+          },
+        }),
+      },
+    ];
+
+    const events = await collectEvents(
+      translateStream(makeSSEStream(sseEvents)),
+    );
+
+    const finish = events[0];
+    expect(finish?.type).toBe(StreamEventType.FINISH);
+    if (finish?.type === StreamEventType.FINISH) {
+      expect(finish.usage?.raw).toBeDefined();
+      const raw = finish.usage?.raw as Record<string, unknown>;
+      expect(raw["input_tokens"]).toBe(15);
+      expect(raw["output_tokens"]).toBe(25);
+    }
+  });
 });

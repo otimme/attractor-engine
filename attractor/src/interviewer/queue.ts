@@ -16,6 +16,14 @@ export class QueueInterviewer implements Interviewer {
     return Promise.resolve(createAnswer({ value: AnswerValue.SKIPPED }));
   }
 
+  async askMultiple(questions: Question[]): Promise<Answer[]> {
+    const answers: Answer[] = [];
+    for (const q of questions) {
+      answers.push(await this.ask(q));
+    }
+    return answers;
+  }
+
   inform(_message: string, _stage: string): Promise<void> {
     return Promise.resolve();
   }

@@ -15,6 +15,7 @@ export class StubAdapter implements ProviderAdapter {
   private responses: StubResponse[];
   private callIndex = 0;
   readonly calls: Request[] = [];
+  supportsToolChoice?: (mode: string) => boolean;
 
   constructor(name: string, responses: StubResponse[], options?: { supportsNativeJsonSchema?: boolean }) {
     this.name = name;

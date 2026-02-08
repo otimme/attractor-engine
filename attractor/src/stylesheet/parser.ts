@@ -42,6 +42,16 @@ export function parseStylesheet(source: string): StylesheetRule[] {
       if (value === "") return undefined;
       return { kind: "class", value, specificity: 1 };
     }
+    // Bare identifier = shape selector (e.g. "box { ... }")
+    if (ch !== undefined && /[a-zA-Z]/.test(ch)) {
+      const start = pos;
+      while (pos < trimmed.length && /[a-zA-Z0-9_-]/.test(trimmed[pos] ?? "")) {
+        pos++;
+      }
+      const value = trimmed.slice(start, pos);
+      if (value === "") return undefined;
+      return { kind: "shape", value, specificity: 0.5 };
+    }
     return undefined;
   }
 

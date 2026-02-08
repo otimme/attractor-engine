@@ -1,4 +1,4 @@
-import type { RegisteredTool } from "../types/index.js";
+import type { ExecutionEnvironment, RegisteredTool, Turn } from "../types/index.js";
 
 export interface SubAgentResult {
   output: string;
@@ -12,6 +12,8 @@ export interface SubAgentHandle {
   submit: (input: string) => Promise<void>;
   waitForCompletion: () => Promise<SubAgentResult>;
   close: () => Promise<void>;
+  /** Optional: inspect subagent conversation history. */
+  getHistory?: () => Turn[];
 }
 
 export type SessionFactory = (options: {
@@ -19,6 +21,8 @@ export type SessionFactory = (options: {
   workingDir?: string;
   model?: string;
   maxTurns?: number;
+  depthConfig?: SubAgentDepthConfig;
+  executionEnv?: ExecutionEnvironment;
 }) => Promise<SubAgentHandle>;
 
 export interface SubAgentDepthConfig {
@@ -50,7 +54,7 @@ export function createSpawnAgentTool(
         required: ["task"],
       },
     },
-    executor: async (args) => {
+    executor: async (args, env) => {
       if (depthConfig && depthConfig.currentDepth >= depthConfig.maxDepth) {
         return `Error: Subagent spawning is disabled at depth ${depthConfig.currentDepth} (max depth: ${depthConfig.maxDepth})`;
       }
@@ -60,7 +64,10 @@ export function createSpawnAgentTool(
       const model = args.model as string | undefined;
       const maxTurns = (args.max_turns as number | undefined) ?? 50;
 
-      const handle = await factory({ task, workingDir, model, maxTurns });
+      const childDepth = depthConfig
+        ? { currentDepth: depthConfig.currentDepth + 1, maxDepth: depthConfig.maxDepth }
+        : undefined;
+      const handle = await factory({ task, workingDir, model, maxTurns, depthConfig: childDepth, executionEnv: env });
       agents.set(handle.id, handle);
       return `Spawned agent ${handle.id} (status: ${handle.status})`;
     },

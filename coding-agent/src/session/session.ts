@@ -45,6 +45,7 @@ export class Session {
   private followupQueue: string[];
   subagents: Map<string, SubAgentHandle>;
   private abortController: AbortController;
+  private runningAbortControllers: Set<AbortController>;
   private gitContext: { isGitRepo: boolean; branch?: string; gitRoot?: string; modifiedCount?: number; untrackedCount?: number; recentCommits?: string[] } | null;
 
   constructor(options: {
@@ -65,6 +66,7 @@ export class Session {
     this.followupQueue = [];
     this.subagents = new Map();
     this.abortController = new AbortController();
+    this.runningAbortControllers = new Set();
     this.gitContext = null;
 
     this.emit(EventKind.SESSION_START);
@@ -88,7 +90,14 @@ export class Session {
   }
 
   async close(): Promise<void> {
+    if (this.state === SessionState.CLOSED) {
+      return;
+    }
     this.abortController.abort();
+    for (const controller of this.runningAbortControllers) {
+      controller.abort();
+    }
+    this.runningAbortControllers.clear();
     for (const [, agent] of this.subagents) {
       await agent.close();
     }
@@ -126,7 +135,29 @@ export class Session {
       this.gitContext = await this.gatherGitContext();
     }
 
-    // 4. Loop
+    // 4. Build system prompt (cached across tool rounds)
+    const providerFileNames = this.getProviderFileNames();
+    const projectDocs = await discoverProjectDocs(
+      this.executionEnv,
+      providerFileNames,
+      this.gitContext?.gitRoot,
+    );
+    const envOptions: EnvironmentContextOptions = {
+      isGitRepo: this.gitContext?.isGitRepo,
+      gitBranch: this.gitContext?.branch,
+      modifiedCount: this.gitContext?.modifiedCount,
+      untrackedCount: this.gitContext?.untrackedCount,
+      recentCommits: this.gitContext?.recentCommits,
+      modelDisplayName: this.providerProfile.model,
+    };
+    const systemPrompt = this.providerProfile.buildSystemPrompt(
+      this.executionEnv,
+      projectDocs,
+      envOptions,
+      this.config.userInstructions,
+    );
+
+    // 5. Loop
     let roundCount = 0;
     let hadLLMError = false;
 
@@ -154,29 +185,7 @@ export class Session {
         break;
       }
 
-      // d. Build system prompt
-      const providerFileNames = this.getProviderFileNames();
-      const projectDocs = await discoverProjectDocs(
-        this.executionEnv,
-        providerFileNames,
-        this.gitContext?.gitRoot,
-      );
-      const envOptions: EnvironmentContextOptions = {
-        isGitRepo: this.gitContext?.isGitRepo,
-        gitBranch: this.gitContext?.branch,
-        modifiedCount: this.gitContext?.modifiedCount,
-        untrackedCount: this.gitContext?.untrackedCount,
-        recentCommits: this.gitContext?.recentCommits,
-        modelDisplayName: this.providerProfile.model,
-      };
-      const systemPrompt = this.providerProfile.buildSystemPrompt(
-        this.executionEnv,
-        projectDocs,
-        envOptions,
-        this.config.userInstructions,
-      );
-
-      // e. Convert history to messages
+      // d. Convert history to messages
       const historyMessages = convertHistoryToMessages(this.history);
 
       // f. Build LLM request
@@ -243,6 +252,7 @@ export class Session {
       // j. Emit (non-streaming path emits ASSISTANT_TEXT_END here;
       //    streaming path already emitted START/DELTA/END in callLLMStreaming)
       if (!useStreaming) {
+        this.emit(EventKind.ASSISTANT_TEXT_START);
         this.emit(EventKind.ASSISTANT_TEXT_END, {
           text,
           toolCallCount: toolCalls.length,
@@ -288,9 +298,7 @@ export class Session {
 
     // 7. Check abort/error → CLOSED
     if (this.abortController.signal.aborted || hadLLMError) {
-      this.state = SessionState.CLOSED;
-      this.emit(EventKind.SESSION_END);
-      this.emitter.close();
+      await this.close();
       return;
     }
 
@@ -302,7 +310,7 @@ export class Session {
     }
 
     // 9. Set state
-    this.state = SessionState.AWAITING_INPUT;
+    this.state = SessionState.IDLE;
 
     // 10. Emit SESSION_END
     this.emit(EventKind.SESSION_END);
@@ -345,25 +353,42 @@ export class Session {
       return { toolCallId: toolCall.id, content: errorMsg, isError: true };
     }
 
+    // 3. Parse arguments (before execution try/catch)
+    let args: Record<string, unknown>;
     try {
-      // a. Parse arguments
-      const args: Record<string, unknown> =
+      args =
         typeof toolCall.arguments === "string"
           ? (JSON.parse(toolCall.arguments) as Record<string, unknown>)
           : toolCall.arguments;
+    } catch (parseError: unknown) {
+      const parseMsg = parseError instanceof Error ? parseError.message : String(parseError);
+      const errorMsg = `Invalid JSON arguments for tool ${toolCall.name}: ${parseMsg}`;
+      this.emit(EventKind.TOOL_CALL_END, {
+        call_id: toolCall.id,
+        error: errorMsg,
+      });
+      return { toolCallId: toolCall.id, content: errorMsg, isError: true };
+    }
 
-      // a2. Validate arguments against schema
-      const validationError = validateToolArgs(args, tool.definition.parameters);
-      if (validationError !== null) {
-        const errorMsg = `Validation error for tool ${toolCall.name}: ${validationError}`;
-        this.emit(EventKind.TOOL_CALL_END, {
-          call_id: toolCall.id,
-          error: errorMsg,
-        });
-        return { toolCallId: toolCall.id, content: errorMsg, isError: true };
-      }
+    // 4. Validate arguments against schema (before execution try/catch)
+    const validationError = validateToolArgs(args, tool.definition.parameters);
+    if (validationError !== null) {
+      const errorMsg = `Validation error for tool ${toolCall.name}: ${validationError}`;
+      this.emit(EventKind.TOOL_CALL_END, {
+        call_id: toolCall.id,
+        error: errorMsg,
+      });
+      return { toolCallId: toolCall.id, content: errorMsg, isError: true };
+    }
 
-      // b. Pre-hook interceptor
+    // 5. Create per-tool AbortController linked to session abort
+    const toolAbortController = new AbortController();
+    const onSessionAbort = () => toolAbortController.abort();
+    this.abortController.signal.addEventListener("abort", onSessionAbort);
+    this.runningAbortControllers.add(toolAbortController);
+
+    try {
+      // a. Pre-hook interceptor
       const interceptor = this.config.toolCallInterceptor;
       if (interceptor?.pre) {
         const proceed = await interceptor.pre(toolCall.name, args);
@@ -377,27 +402,27 @@ export class Session {
         }
       }
 
-      // c. Execute
-      const rawOutput = await tool.executor(args, this.executionEnv);
+      // b. Execute
+      const rawOutput = await tool.executor(args, this.executionEnv, toolAbortController.signal);
 
-      // d. Post-hook interceptor
+      // c. Post-hook interceptor
       if (interceptor?.post) {
         await interceptor.post(toolCall.name, args, rawOutput);
       }
 
-      // e. Truncate
+      // d. Truncate
       const truncatedOutput = truncateToolOutput(rawOutput, toolCall.name, {
         toolOutputLimits: this.config.toolOutputLimits,
         toolLineLimits: this.config.toolLineLimits,
       });
 
-      // f. Emit TOOL_CALL_END with full output
+      // e. Emit TOOL_CALL_END with full output
       this.emit(EventKind.TOOL_CALL_END, {
         call_id: toolCall.id,
         output: rawOutput,
       });
 
-      // g. Return truncated result
+      // f. Return truncated result
       return {
         toolCallId: toolCall.id,
         content: truncatedOutput,
@@ -412,6 +437,9 @@ export class Session {
         error: errorMsg,
       });
       return { toolCallId: toolCall.id, content: errorMsg, isError: true };
+    } finally {
+      this.runningAbortControllers.delete(toolAbortController);
+      this.abortController.signal.removeEventListener("abort", onSessionAbort);
     }
   }
 

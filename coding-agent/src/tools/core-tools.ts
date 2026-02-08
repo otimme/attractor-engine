@@ -203,13 +203,17 @@ export function createShellTool(config: {
         required: ["command"],
       },
     },
-    executor: async (args, env) => {
+    executor: async (args, env, signal) => {
       const command = args.command as string;
       const requestedTimeout = args.timeout_ms as number | undefined;
       const timeout = Math.min(
         requestedTimeout ?? config.defaultTimeoutMs,
         config.maxTimeoutMs,
       );
+
+      if (signal?.aborted) {
+        return "[ERROR: Command aborted before execution.]";
+      }
 
       const result = await env.execCommand(command, timeout);
 
@@ -250,6 +254,12 @@ export function createGrepTool(): RegisteredTool {
             description: "Maximum number of results",
             default: 100,
           },
+          output_mode: {
+            type: "string",
+            enum: ["content", "files_with_matches", "count"],
+            description: "Output mode: content (matching lines), files_with_matches (file paths only), count (match counts per file)",
+            default: "content",
+          },
         },
         required: ["pattern"],
       },
@@ -260,11 +270,13 @@ export function createGrepTool(): RegisteredTool {
       const globFilter = args.glob_filter as string | undefined;
       const caseInsensitive = args.case_insensitive as boolean | undefined;
       const maxResults = args.max_results as number | undefined;
+      const outputMode = args.output_mode as "content" | "files_with_matches" | "count" | undefined;
 
       return env.grep(pattern, path, {
         caseInsensitive,
         globFilter,
         maxResults: maxResults ?? 100,
+        outputMode,
       });
     },
   };

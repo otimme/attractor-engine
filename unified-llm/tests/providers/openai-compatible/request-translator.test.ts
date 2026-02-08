@@ -431,6 +431,28 @@ describe("OpenAI-Compatible Request Translator", () => {
     expect(body.stream).toBe(true);
   });
 
+  test("includes stream_options with include_usage when streaming", () => {
+    const request = makeRequest({
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Hi" }] },
+      ],
+    });
+
+    const { body } = translateRequest(request, true);
+    expect(body.stream_options).toEqual({ include_usage: true });
+  });
+
+  test("does not include stream_options when not streaming", () => {
+    const request = makeRequest({
+      messages: [
+        { role: Role.USER, content: [{ kind: "text", text: "Hi" }] },
+      ],
+    });
+
+    const { body } = translateRequest(request, false);
+    expect(body.stream_options).toBeUndefined();
+  });
+
   test("merges providerOptions.openai_compatible into body", () => {
     const request = makeRequest({
       messages: [
@@ -463,5 +485,43 @@ describe("OpenAI-Compatible Request Translator", () => {
       role: "assistant",
       content: "I can help with that.",
     });
+  });
+
+  test("emits warning for audio content parts", () => {
+    const request = makeRequest({
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "text", text: "Listen" },
+            { kind: "audio", audio: { data: new Uint8Array([1, 2]), mediaType: "audio/wav" } },
+          ],
+        },
+      ],
+    });
+
+    const { warnings } = translateRequest(request, false);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("Audio");
+  });
+
+  test("emits warning for document content parts", () => {
+    const request = makeRequest({
+      messages: [
+        {
+          role: Role.USER,
+          content: [
+            { kind: "text", text: "Read" },
+            { kind: "document", document: { data: new Uint8Array([1]), mediaType: "application/pdf" } },
+          ],
+        },
+      ],
+    });
+
+    const { warnings } = translateRequest(request, false);
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("Document");
   });
 });

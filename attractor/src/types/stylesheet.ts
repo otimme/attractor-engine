@@ -1,7 +1,7 @@
 export interface Selector {
-  kind: "universal" | "class" | "id";
-  value: string; // "*" for universal, class name, or node id
-  specificity: number; // 0=universal, 1=class, 2=id
+  kind: "universal" | "shape" | "class" | "id";
+  value: string; // "*" for universal, shape name, class name, or node id
+  specificity: number; // 0=universal, 0.5=shape, 1=class, 2=id
 }
 
 export interface Declaration {

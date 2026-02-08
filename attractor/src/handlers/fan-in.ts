@@ -1,7 +1,8 @@
-import type { Handler } from "../types/handler.js";
+import type { Handler, CodergenBackend } from "../types/handler.js";
 import type { Node, Graph } from "../types/graph.js";
 import type { Context } from "../types/context.js";
 import type { Outcome } from "../types/outcome.js";
+import { getStringAttr } from "../types/graph.js";
 import { StageStatus, createOutcome } from "../types/outcome.js";
 
 interface ParallelResult {
@@ -31,7 +32,44 @@ function heuristicSelect(candidates: readonly ParallelResult[]): ParallelResult 
   return sorted[0];
 }
 
+function buildEvaluationPrompt(candidates: readonly ParallelResult[]): string {
+  const descriptions = candidates.map(
+    (c) => `- Candidate "${c.nodeId}": status=${c.status}, notes=${c.notes}`,
+  );
+  return [
+    "Evaluate these candidates and select the best one.",
+    "Reply with only the candidate ID on the first line.",
+    "",
+    ...descriptions,
+  ].join("\n");
+}
+
+function parseLlmSelection(
+  response: string,
+  candidates: readonly ParallelResult[],
+): ParallelResult | undefined {
+  const candidateIds = new Set(candidates.map((c) => c.nodeId));
+  // Check first line for an exact candidate ID
+  const firstLine = response.split("\n")[0]?.trim() ?? "";
+  if (candidateIds.has(firstLine)) {
+    return candidates.find((c) => c.nodeId === firstLine);
+  }
+  // Scan entire response for any candidate ID mention
+  for (const candidate of candidates) {
+    if (response.includes(candidate.nodeId)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
 export class FanInHandler implements Handler {
+  private readonly backend: CodergenBackend | undefined;
+
+  constructor(backend?: CodergenBackend) {
+    this.backend = backend;
+  }
+
   async execute(node: Node, context: Context, _graph: Graph, _logsRoot: string): Promise<Outcome> {
     // 1. Read parallel results
     const raw = context.get("parallel.results");
@@ -69,7 +107,31 @@ export class FanInHandler implements Handler {
       });
     }
 
-    // 3. Heuristic selection
+    // 3. LLM-based evaluation if prompt attribute exists and backend available
+    const prompt = getStringAttr(node.attributes, "prompt");
+    if (prompt !== "" && this.backend) {
+      try {
+        const evalPrompt = prompt + "\n\n" + buildEvaluationPrompt(results);
+        const response = await this.backend.run(node, evalPrompt, context);
+        const responseText = typeof response === "string" ? response : response.notes;
+        const selected = parseLlmSelection(responseText, results);
+        if (selected) {
+          return createOutcome({
+            status: StageStatus.SUCCESS,
+            contextUpdates: {
+              "parallel.fan_in.best_id": selected.nodeId,
+              "parallel.fan_in.best_outcome": selected.status,
+            },
+            notes: "LLM selected candidate: " + selected.nodeId,
+          });
+        }
+        // LLM response didn't match any candidate; fall through to heuristic
+      } catch {
+        // LLM error; fall through to heuristic
+      }
+    }
+
+    // 4. Heuristic selection (fallback)
     const best = heuristicSelect(results);
     if (!best) {
       return createOutcome({

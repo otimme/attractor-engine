@@ -82,6 +82,8 @@ export function createAnthropicProfile(
           betaHeaders: [
             "interleaved-thinking-2025-05-14",
             "output-128k-2025-02-19",
+            // TODO: 1M context support may require an additional beta header
+            // (e.g. "context-1m-YYYY-MM-DD") depending on API version.
           ],
         },
       };
