@@ -1,8 +1,16 @@
+import type { Message } from "./message.js";
+
+export interface ToolExecutionContext {
+  messages: ReadonlyArray<Message>;
+  abortSignal?: AbortSignal;
+  toolCallId: string;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute?: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+  execute?: (args: Record<string, unknown>, context?: ToolExecutionContext) => Promise<unknown> | unknown;
 }
 
 export interface ToolCall {

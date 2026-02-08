@@ -4,6 +4,7 @@ import type { StreamEvent } from "../../types/stream-event.js";
 import type { ProviderAdapter } from "../../types/provider-adapter.js";
 import type { AdapterTimeout } from "../../types/timeout.js";
 import {
+  SDKError,
   AuthenticationError,
   AccessDeniedError,
   NotFoundError,
@@ -11,8 +12,12 @@ import {
   RateLimitError,
   ServerError,
   ContextLengthError,
+  ContentFilterError,
+  QuotaExceededError,
+  RequestTimeoutError,
   ProviderError,
 } from "../../types/errors.js";
+import { classifyByMessage } from "../../utils/error-classify.js";
 import { httpRequest, httpRequestStream } from "../../utils/http.js";
 import { parseSSE } from "../../utils/sse.js";
 import { str, rec } from "../../utils/extract.js";
@@ -42,12 +47,43 @@ function parseRetryAfterHeader(headers: Headers): number | undefined {
   return undefined;
 }
 
+function mapGrpcStatus(
+  grpcStatus: string,
+  message: string,
+  provider: string,
+  status: number,
+  body: unknown,
+  headers: Headers,
+): SDKError | undefined {
+  switch (grpcStatus) {
+    case "NOT_FOUND":
+      return new NotFoundError(message, provider, grpcStatus, body);
+    case "INVALID_ARGUMENT":
+      return new InvalidRequestError(message, provider, grpcStatus, body);
+    case "UNAUTHENTICATED":
+      return new AuthenticationError(message, provider, grpcStatus, body);
+    case "PERMISSION_DENIED":
+      return new AccessDeniedError(message, provider, grpcStatus, body);
+    case "RESOURCE_EXHAUSTED": {
+      const retryAfter = parseRetryAfterHeader(headers);
+      return new RateLimitError(message, provider, grpcStatus, retryAfter, body);
+    }
+    case "UNAVAILABLE":
+    case "INTERNAL":
+      return new ServerError(message, provider, grpcStatus, status, body);
+    case "DEADLINE_EXCEEDED":
+      return new RequestTimeoutError(message);
+    default:
+      return undefined;
+  }
+}
+
 function mapError(
   status: number,
   body: unknown,
   provider: string,
   headers: Headers,
-): ProviderError | undefined {
+): SDKError | undefined {
   const errorBody = rec(body);
   const errorObj = rec(errorBody?.["error"]);
   const message = str(
@@ -67,10 +103,18 @@ function mapError(
       return new AccessDeniedError(message, provider, errorCode, body);
     case 404:
       return new NotFoundError(message, provider, errorCode, body);
-    case 400:
+    case 400: {
+      const classification = classifyByMessage(message);
+      if (classification === "context_length") {
+        return new ContextLengthError(message, provider, errorCode, body);
+      }
+      if (classification === "content_filter") {
+        return new ContentFilterError(message, provider, errorCode, body);
+      }
       return new InvalidRequestError(message, provider, errorCode, body);
+    }
     case 408:
-      return new ServerError(message, provider, errorCode, 408, body);
+      return new RequestTimeoutError(message);
     case 413:
       return new ContextLengthError(message, provider, errorCode, body);
     case 422:
@@ -83,8 +127,30 @@ function mapError(
       if (status >= 500) {
         return new ServerError(message, provider, errorCode, status, body);
       }
-      return undefined;
+      break;
   }
+
+  if (errorCode) {
+    const grpcMapped = mapGrpcStatus(errorCode, message, provider, status, body, headers);
+    if (grpcMapped) {
+      return grpcMapped;
+    }
+  }
+
+  const classification = classifyByMessage(message);
+  if (classification === "content_filter") {
+    return new ContentFilterError(message, provider, errorCode, body);
+  }
+  if (classification === "quota") {
+    return new QuotaExceededError(message, provider, errorCode, body);
+  }
+  if (classification === "not_found") {
+    return new NotFoundError(message, provider, errorCode, body);
+  }
+  if (classification === "auth") {
+    return new AuthenticationError(message, provider, errorCode, body);
+  }
+  return undefined;
 }
 
 export class GeminiAdapter implements ProviderAdapter {

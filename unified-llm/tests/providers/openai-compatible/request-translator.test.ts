@@ -300,6 +300,48 @@ describe("OpenAI-Compatible Request Translator", () => {
     });
   });
 
+  test("prefixes error tool result content with Error:", () => {
+    const request = makeRequest({
+      messages: [
+        {
+          role: Role.ASSISTANT,
+          content: [
+            {
+              kind: "tool_call",
+              toolCall: {
+                id: "call_err",
+                name: "read_file",
+                arguments: { path: "/missing" },
+              },
+            },
+          ],
+        },
+        {
+          role: Role.TOOL,
+          content: [
+            {
+              kind: "tool_result",
+              toolResult: {
+                toolCallId: "call_err",
+                content: "file not found",
+                isError: true,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const { body } = translateRequest(request, false);
+    const messages = body.messages as Array<Record<string, unknown>>;
+
+    expect(messages[1]).toEqual({
+      role: "tool",
+      tool_call_id: "call_err",
+      content: "Error: file not found",
+    });
+  });
+
   test("maps max_tokens directly", () => {
     const request = makeRequest({
       messages: [

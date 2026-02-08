@@ -22,12 +22,13 @@ export interface ToolCallData {
   id: string;
   name: string;
   arguments: Record<string, unknown> | string;
+  rawArguments?: string;
   type?: string;
 }
 
 export interface ToolResultData {
   toolCallId: string;
-  content: string | Record<string, unknown>;
+  content: string | Record<string, unknown> | unknown[];
   isError: boolean;
   imageData?: Uint8Array;
   imageMediaType?: string;
@@ -79,6 +80,11 @@ export interface RedactedThinkingPart {
   thinking: ThinkingData;
 }
 
+export interface CustomPart {
+  kind: string & {};
+  data: unknown;
+}
+
 export type ContentPart =
   | TextPart
   | ImagePart
@@ -88,6 +94,9 @@ export type ContentPart =
   | ToolResultPart
   | ThinkingPart
   | RedactedThinkingPart;
+
+/** Use `ContentPart | CustomPart` when extensibility is needed. */
+export type ExtendedContentPart = ContentPart | CustomPart;
 
 export function isTextPart(part: ContentPart): part is TextPart {
   return part.kind === "text";
@@ -121,4 +130,19 @@ export function isRedactedThinkingPart(
   part: ContentPart,
 ): part is RedactedThinkingPart {
   return part.kind === "redacted_thinking";
+}
+
+const KNOWN_KINDS = new Set([
+  "text",
+  "image",
+  "audio",
+  "document",
+  "tool_call",
+  "tool_result",
+  "thinking",
+  "redacted_thinking",
+]);
+
+export function isCustomPart(part: ExtendedContentPart): part is CustomPart {
+  return !KNOWN_KINDS.has(part.kind);
 }

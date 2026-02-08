@@ -4,6 +4,7 @@ import type { Response } from "../types/response.js";
 import type { StreamEvent } from "../types/stream-event.js";
 import { ConfigurationError } from "../types/errors.js";
 import type { Middleware, StreamMiddleware } from "./middleware.js";
+import { getLatestModel } from "../models/catalog.js";
 import {
   buildMiddlewareChain,
   buildStreamMiddlewareChain,
@@ -52,25 +53,38 @@ export class Client {
     return adapter;
   }
 
+  private applyDefaultModel(request: Request, providerName: string): Request {
+    if (request.model) {
+      return request;
+    }
+    const latest = getLatestModel(providerName);
+    if (latest) {
+      return { ...request, model: latest.id };
+    }
+    return request;
+  }
+
   async complete(request: Request): Promise<Response> {
     const adapter = this.resolveProvider(request.provider);
+    const resolved = this.applyDefaultModel(request, adapter.name);
     const handler = async (req: Request): Promise<Response> => {
       const response = await adapter.complete(req);
       return { ...response, provider: adapter.name };
     };
     const chain = buildMiddlewareChain(this.middleware, handler);
-    return chain(request);
+    return chain(resolved);
   }
 
   async *stream(request: Request): AsyncGenerator<StreamEvent> {
     const adapter = this.resolveProvider(request.provider);
+    const resolved = this.applyDefaultModel(request, adapter.name);
     const baseHandler = (req: Request): AsyncGenerator<StreamEvent> =>
       adapter.stream(req);
     const chain = buildStreamMiddlewareChain(
       this.streamMiddleware,
       baseHandler,
     );
-    yield* chain(request);
+    yield* chain(resolved);
   }
 
   registerProvider(name: string, adapter: ProviderAdapter): void {

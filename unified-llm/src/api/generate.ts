@@ -1,25 +1,30 @@
 import type { Message } from "../types/message.js";
 import { systemMessage, userMessage, toolResultMessage } from "../types/message.js";
-import type { ToolDefinition, ToolChoice } from "../types/tool.js";
+import type { ToolDefinition, ToolCall, ToolChoice, ToolExecutionContext } from "../types/tool.js";
 import type { ResponseFormat } from "../types/response-format.js";
 import type { Request } from "../types/request.js";
 import type { Response, Usage } from "../types/response.js";
 import { addUsage, responseText, responseToolCalls, responseReasoning } from "../types/response.js";
 import type { TimeoutConfig, AdapterTimeout } from "../types/timeout.js";
 import { ConfigurationError, RequestTimeoutError } from "../types/errors.js";
+import { validateToolName } from "../utils/validate-tool-name.js";
+import { validateJsonSchema } from "../utils/validate-json-schema.js";
 import { retry } from "../utils/retry.js";
+import type { RetryPolicy } from "../utils/retry.js";
 import type { Client } from "../client/client.js";
 import { getDefaultClient } from "../client/default-client.js";
 import type { StepResult, GenerateResult, StopCondition } from "./types.js";
 
+export type { ToolExecutionContext } from "../types/tool.js";
+
 function toAdapterTimeout(timeout: number | TimeoutConfig, remainingMs?: number): AdapterTimeout {
   if (typeof timeout === "number") {
-    const ms = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
-    return { connect: ms, request: ms, streamRead: ms };
+    const requestMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
+    return { connect: 10_000, request: requestMs, streamRead: requestMs };
   }
-  const ms = timeout.perStep ?? timeout.total ?? 120_000;
-  const clamped = remainingMs != null ? Math.min(ms, remainingMs) : ms;
-  return { connect: clamped, request: clamped, streamRead: clamped };
+  const requestMs = timeout.perStep ?? timeout.total ?? 120_000;
+  const clamped = remainingMs != null ? Math.min(requestMs, remainingMs) : requestMs;
+  return { connect: 10_000, request: clamped, streamRead: clamped };
 }
 
 export interface GenerateOptions {
@@ -40,8 +45,10 @@ export interface GenerateOptions {
   provider?: string;
   providerOptions?: Record<string, Record<string, unknown>>;
   maxRetries?: number;
+  retryPolicy?: RetryPolicy;
   timeout?: number | TimeoutConfig;
   abortSignal?: AbortSignal;
+  repairToolCall?: (toolCall: ToolCall, error: Error) => Promise<Record<string, unknown>>;
   client?: Client;
 }
 
@@ -86,6 +93,15 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     throw new ConfigurationError("Cannot specify both 'prompt' and 'messages'");
   }
 
+  if (options.tools) {
+    for (const tool of options.tools) {
+      const nameError = validateToolName(tool.name);
+      if (nameError) {
+        throw new ConfigurationError(`Invalid tool name "${tool.name}": ${nameError}`);
+      }
+    }
+  }
+
   const messages: Message[] = [];
   if (options.system) {
     messages.push(systemMessage(options.system));
@@ -99,6 +115,14 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   const maxToolRounds = options.maxToolRounds ?? 1;
   const maxRetries = options.maxRetries ?? 2;
   const client = options.client ?? getDefaultClient();
+
+  const policy: RetryPolicy = options.retryPolicy ?? {
+    maxRetries,
+    baseDelay: 1.0,
+    maxDelay: 60.0,
+    backoffMultiplier: 2.0,
+    jitter: true,
+  };
 
   const steps: StepResult[] = [];
   let totalUsage: Usage = { ...zeroUsage };
@@ -138,7 +162,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
     const response = await retry(
       () => client.complete(request),
-      { maxRetries, baseDelay: 1.0, maxDelay: 60.0, backoffMultiplier: 2.0, jitter: true },
+      policy,
     );
 
     lastResponse = response;
@@ -162,8 +186,34 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
         }
 
         try {
-          const args = typeof tc.arguments === "string" ? {} : tc.arguments;
-          const result = await toolDef.execute(args);
+          let args = typeof tc.arguments === "string" ? {} : tc.arguments;
+
+          // Validate arguments against tool schema if parameters are defined
+          if (toolDef.parameters && Object.keys(toolDef.parameters).length > 0) {
+            const validation = validateJsonSchema(args, toolDef.parameters);
+            if (!validation.valid) {
+              const validationError = new Error(`Tool argument validation failed: ${validation.errors}`);
+
+              // Try repair if provided
+              if (options.repairToolCall) {
+                const toolCall = buildToolCall(tc);
+                args = await options.repairToolCall(toolCall, validationError);
+              } else {
+                return {
+                  toolCallId: tc.id,
+                  content: validationError.message,
+                  isError: true,
+                };
+              }
+            }
+          }
+
+          const context: ToolExecutionContext = {
+            messages,
+            abortSignal: options.abortSignal,
+            toolCallId: tc.id,
+          };
+          const result = await toolDef.execute(args, context);
           const content = typeof result === "string" ? result : JSON.stringify(result);
           return {
             toolCallId: tc.id,

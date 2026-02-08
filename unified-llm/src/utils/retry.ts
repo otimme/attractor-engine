@@ -6,7 +6,7 @@ export interface RetryPolicy {
   maxDelay: number;
   backoffMultiplier: number;
   jitter: boolean;
-  onRetry?: (error: SDKError, attempt: number, delay: number) => void;
+  onRetry?: (error: Error, attempt: number, delay: number) => void;
 }
 
 export const defaultRetryPolicy: RetryPolicy = {
@@ -68,7 +68,7 @@ export async function retry<T>(
         throw error;
       }
 
-      if (error instanceof SDKError && policy.onRetry) {
+      if (policy.onRetry) {
         policy.onRetry(error, attempt + 1, delay);
       }
 

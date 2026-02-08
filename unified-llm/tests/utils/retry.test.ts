@@ -74,6 +74,28 @@ describe("retry", () => {
     expect(retryAttempts).toEqual([1, 2]);
   });
 
+  test("calls onRetry for non-SDKError errors", async () => {
+    const retryErrors: Error[] = [];
+    let attempts = 0;
+    const policyWithCallback: RetryPolicy = {
+      ...fastPolicy,
+      maxRetries: 1,
+      onRetry: (error, _attempt, _delay) => {
+        retryErrors.push(error);
+      },
+    };
+
+    await expect(
+      retry(async () => {
+        attempts++;
+        throw new Error("generic error");
+      }, policyWithCallback),
+    ).rejects.toThrow("generic error");
+
+    expect(retryErrors).toHaveLength(1);
+    expect(retryErrors[0]?.message).toBe("generic error");
+  });
+
   test("does not retry non-Error throws", async () => {
     await expect(
       retry(async () => {

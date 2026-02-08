@@ -66,6 +66,7 @@ describe("OpenAI Response Translator", () => {
           id: "call_abc",
           name: "get_weather",
           arguments: { city: "San Francisco" },
+          rawArguments: '{"city":"San Francisco"}',
         },
       },
     ]);
@@ -114,6 +115,7 @@ describe("OpenAI Response Translator", () => {
         id: "call_xyz",
         name: "search",
         arguments: { query: "weather" },
+        rawArguments: '{"query":"weather"}',
       },
     });
     expect(response.finishReason.reason).toBe("tool_calls");

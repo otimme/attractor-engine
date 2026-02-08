@@ -78,6 +78,37 @@ describe("Gemini response translator", () => {
     expect(response.finishReason.reason).toBe("tool_calls");
   });
 
+  test("populates rawArguments on tool call parts", () => {
+    const body = {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: "test_tool",
+                  args: { key: "value" },
+                },
+              },
+            ],
+            role: "model",
+          },
+          finishReason: "STOP",
+        },
+      ],
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+    };
+
+    const response = translateResponse(body);
+    const part = response.message.content[0];
+
+    expect(part?.kind).toBe("tool_call");
+    if (part?.kind === "tool_call") {
+      expect(part.toolCall.rawArguments).toBe('{"key":"value"}');
+      expect(part.toolCall.arguments).toEqual({ key: "value" });
+    }
+  });
+
   test("maps STOP to stop", () => {
     const body = {
       candidates: [

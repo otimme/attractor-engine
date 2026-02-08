@@ -1,6 +1,6 @@
 import type { StreamEvent } from "../types/stream-event.js";
 import { StreamEventType } from "../types/stream-event.js";
-import type { Response, Usage, FinishReason } from "../types/response.js";
+import type { Response, Usage, FinishReason, Warning } from "../types/response.js";
 import type { ContentPart, ToolCallData } from "../types/content-part.js";
 import { Role } from "../types/role.js";
 import { rec } from "./extract.js";
@@ -28,6 +28,7 @@ export class StreamAccumulator {
     outputTokens: 0,
     totalTokens: 0,
   };
+  private warnings: Warning[] = [];
 
   constructor(provider = "") {
     this.provider = provider;
@@ -127,6 +128,10 @@ export class StreamAccumulator {
     }
   }
 
+  addWarning(warning: Warning): void {
+    this.warnings.push(warning);
+  }
+
   response(): Response {
     const content: ContentPart[] = [];
 
@@ -168,7 +173,7 @@ export class StreamAccumulator {
       },
       finishReason: this.finishReason,
       usage: this.usage,
-      warnings: [],
+      warnings: this.warnings,
     };
   }
 }

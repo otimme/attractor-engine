@@ -4,6 +4,7 @@ import type { StreamEvent } from "../../types/stream-event.js";
 import type { ProviderAdapter } from "../../types/provider-adapter.js";
 import type { AdapterTimeout } from "../../types/timeout.js";
 import {
+  SDKError,
   ProviderError,
   AuthenticationError,
   AccessDeniedError,
@@ -12,7 +13,11 @@ import {
   RateLimitError,
   ServerError,
   ContextLengthError,
+  ContentFilterError,
+  QuotaExceededError,
+  RequestTimeoutError,
 } from "../../types/errors.js";
+import { classifyByMessage } from "../../utils/error-classify.js";
 import { httpRequest, httpRequestStream } from "../../utils/http.js";
 import { parseSSE } from "../../utils/sse.js";
 import { str, rec } from "../../utils/extract.js";
@@ -75,19 +80,18 @@ function mapError(
   body: unknown,
   provider: string,
   headers: Headers,
-): ProviderError | undefined {
+): SDKError | undefined {
   const message = extractErrorMessage(body);
   const errorCode = extractErrorCode(body);
 
   switch (status) {
     case 400: {
-      const lower = message.toLowerCase();
-      if (
-        lower.includes("context length") ||
-        lower.includes("too many tokens") ||
-        lower.includes("maximum context")
-      ) {
+      const classification = classifyByMessage(message);
+      if (classification === "context_length") {
         return new ContextLengthError(message, provider, errorCode, body);
+      }
+      if (classification === "content_filter") {
+        return new ContentFilterError(message, provider, errorCode, body);
       }
       return new InvalidRequestError(message, provider, errorCode, body);
     }
@@ -98,7 +102,7 @@ function mapError(
     case 404:
       return new NotFoundError(message, provider, errorCode, body);
     case 408:
-      return new ServerError(message, provider, errorCode, 408, body);
+      return new RequestTimeoutError(message);
     case 413:
       return new ContextLengthError(message, provider, errorCode, body);
     case 422:
@@ -111,8 +115,23 @@ function mapError(
       if (status >= 500) {
         return new ServerError(message, provider, errorCode, status, body);
       }
-      return undefined;
+      break;
   }
+
+  const classification = classifyByMessage(message);
+  if (classification === "content_filter") {
+    return new ContentFilterError(message, provider, errorCode, body);
+  }
+  if (classification === "quota") {
+    return new QuotaExceededError(message, provider, errorCode, body);
+  }
+  if (classification === "not_found") {
+    return new NotFoundError(message, provider, errorCode, body);
+  }
+  if (classification === "auth") {
+    return new AuthenticationError(message, provider, errorCode, body);
+  }
+  return undefined;
 }
 
 export class OpenAICompatibleAdapter implements ProviderAdapter {

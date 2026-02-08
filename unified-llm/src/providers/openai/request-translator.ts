@@ -6,6 +6,8 @@ import {
   isImagePart,
   isToolCallPart,
   isToolResultPart,
+  isThinkingPart,
+  isRedactedThinkingPart,
 } from "../../types/content-part.js";
 import { Role } from "../../types/role.js";
 
@@ -44,6 +46,10 @@ function translateContentPartToInput(part: ContentPart): Record<string, unknown>
 function translateAssistantContentPart(part: ContentPart): Record<string, unknown> | undefined {
   if (isTextPart(part)) {
     return { type: "output_text", text: part.text };
+  }
+  // Strip thinking/redacted_thinking parts from cross-provider conversations (spec 3.5)
+  if (isThinkingPart(part) || isRedactedThinkingPart(part)) {
+    return undefined;
   }
   return undefined;
 }

@@ -9,19 +9,22 @@ import type { TimeoutConfig } from "../types/timeout.js";
 import { StreamAccumulator } from "../utils/stream-accumulator.js";
 import type { Client } from "../client/client.js";
 import { getDefaultClient } from "../client/default-client.js";
-import { ConfigurationError, SDKError, ProviderError, RequestTimeoutError } from "../types/errors.js";
-import { computeDelay } from "../utils/retry.js";
-import type { GenerateOptions } from "./generate.js";
+import { ConfigurationError, RequestTimeoutError } from "../types/errors.js";
+import { validateToolName } from "../utils/validate-tool-name.js";
+import { validateJsonSchema } from "../utils/validate-json-schema.js";
+import { retry } from "../utils/retry.js";
+import type { RetryPolicy } from "../utils/retry.js";
+import type { GenerateOptions, ToolExecutionContext } from "./generate.js";
 import type { StepResult, StreamResult } from "./types.js";
 
 function toAdapterTimeout(timeout: number | TimeoutConfig, remainingMs?: number): AdapterTimeout {
   if (typeof timeout === "number") {
-    const ms = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
-    return { connect: ms, request: ms, streamRead: ms };
+    const streamMs = remainingMs != null ? Math.min(timeout, remainingMs) : timeout;
+    return { connect: 10_000, request: 120_000, streamRead: streamMs };
   }
-  const ms = timeout.perStep ?? timeout.total ?? 120_000;
-  const clamped = remainingMs != null ? Math.min(ms, remainingMs) : ms;
-  return { connect: clamped, request: clamped, streamRead: clamped };
+  const streamMs = timeout.perStep ?? timeout.total ?? 30_000;
+  const clamped = remainingMs != null ? Math.min(streamMs, remainingMs) : streamMs;
+  return { connect: 10_000, request: 120_000, streamRead: clamped };
 }
 
 export type StreamOptions = GenerateOptions;
@@ -98,13 +101,26 @@ class StreamResultImpl implements StreamResult {
     return this.accumulator.response();
   }
 
-  async *textStream(): AsyncGenerator<string> {
-    for await (const event of this) {
-      if (event.type === StreamEventType.TEXT_DELTA) {
-        yield event.delta;
+  get textStream(): AsyncGenerator<string> {
+    const self = this;
+    async function* gen(): AsyncGenerator<string> {
+      for await (const event of self) {
+        if (event.type === StreamEventType.TEXT_DELTA) {
+          yield event.delta;
+        }
       }
     }
+    return gen();
   }
+}
+
+function buildToolCall(tc: { id: string; name: string; arguments: Record<string, unknown> | string }) {
+  return {
+    id: tc.id,
+    name: tc.name,
+    arguments: typeof tc.arguments === "string" ? {} : tc.arguments,
+    rawArguments: typeof tc.arguments === "string" ? tc.arguments : undefined,
+  };
 }
 
 export function stream(options: StreamOptions): StreamResult {
@@ -112,7 +128,24 @@ export function stream(options: StreamOptions): StreamResult {
     throw new ConfigurationError("Cannot specify both 'prompt' and 'messages'");
   }
 
+  if (options.tools) {
+    for (const tool of options.tools) {
+      const nameError = validateToolName(tool.name);
+      if (nameError) {
+        throw new ConfigurationError(`Invalid tool name "${tool.name}": ${nameError}`);
+      }
+    }
+  }
+
   const maxRetries = options.maxRetries ?? 2;
+
+  const policy: RetryPolicy = options.retryPolicy ?? {
+    maxRetries,
+    baseDelay: 1.0,
+    maxDelay: 60.0,
+    backoffMultiplier: 2.0,
+    jitter: true,
+  };
 
   const generatorFn = async function* (): AsyncGenerator<StreamEvent> {
     const messages: Message[] = [];
@@ -163,48 +196,21 @@ export function stream(options: StreamOptions): StreamResult {
 
       const accumulator = new StreamAccumulator(options.provider);
 
-      // Retry the initial connection: wrap stream creation + first event read
-      // in a retry loop. Once the first event succeeds, no more retries.
+      // Use retry() to handle initial connection + first event read
       let firstEvent: StreamEvent | undefined;
       let connectedStream: AsyncGenerator<StreamEvent> | undefined;
 
-      const retryPolicy = {
-        maxRetries,
-        baseDelay: 1.0,
-        maxDelay: 60.0,
-        backoffMultiplier: 2.0,
-        jitter: true,
-      };
-
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-          const iter = client.stream(request);
-          const result = await iter.next();
-          if (!result.done) {
-            firstEvent = result.value;
-            connectedStream = iter;
-          }
-          break;
-        } catch (error) {
-          if (attempt >= maxRetries) {
-            throw error;
-          }
-          if (!(error instanceof Error)) {
-            throw error;
-          }
-          if (error instanceof SDKError && !error.retryable) {
-            throw error;
-          }
-
-          const retryAfter =
-            error instanceof ProviderError ? error.retryAfter : undefined;
-          const delay = computeDelay(attempt, retryPolicy, retryAfter);
-          if (delay < 0) {
-            throw error;
-          }
-          await new Promise((resolve) => setTimeout(resolve, delay * 1000));
+      const connected = await retry(async () => {
+        const iter = client.stream(request);
+        const result = await iter.next();
+        if (!result.done) {
+          return { event: result.value, stream: iter };
         }
-      }
+        return { event: undefined, stream: iter };
+      }, policy);
+
+      firstEvent = connected.event;
+      connectedStream = connected.stream;
 
       // Yield the first event and remaining events
       if (firstEvent) {
@@ -254,8 +260,33 @@ export function stream(options: StreamOptions): StreamResult {
             };
           }
           try {
-            const args = typeof tc.arguments === "string" ? {} : tc.arguments;
-            const result = await toolDef.execute(args);
+            let args = typeof tc.arguments === "string" ? {} : tc.arguments;
+
+            // Validate arguments against tool schema if parameters are defined
+            if (toolDef.parameters && Object.keys(toolDef.parameters).length > 0) {
+              const validation = validateJsonSchema(args, toolDef.parameters);
+              if (!validation.valid) {
+                const validationError = new Error(`Tool argument validation failed: ${validation.errors}`);
+
+                if (options.repairToolCall) {
+                  const toolCall = buildToolCall(tc);
+                  args = await options.repairToolCall(toolCall, validationError);
+                } else {
+                  return {
+                    toolCallId: tc.id,
+                    content: validationError.message,
+                    isError: true,
+                  };
+                }
+              }
+            }
+
+            const context: ToolExecutionContext = {
+              messages,
+              abortSignal: options.abortSignal,
+              toolCallId: tc.id,
+            };
+            const result = await toolDef.execute(args, context);
             const content = typeof result === "string" ? result : JSON.stringify(result);
             return { toolCallId: tc.id, content, isError: false };
           } catch (err) {

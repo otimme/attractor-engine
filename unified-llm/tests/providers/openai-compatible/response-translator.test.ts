@@ -79,6 +79,7 @@ describe("OpenAI-Compatible Response Translator", () => {
           id: "call_abc",
           name: "get_weather",
           arguments: { city: "San Francisco" },
+          rawArguments: '{"city":"San Francisco"}',
         },
       },
     ]);
@@ -132,9 +133,52 @@ describe("OpenAI-Compatible Response Translator", () => {
         id: "call_xyz",
         name: "search",
         arguments: { query: "weather" },
+        rawArguments: '{"query":"weather"}',
       },
     });
     expect(response.finishReason.reason).toBe("tool_calls");
+  });
+
+  test("falls back to empty object when arguments JSON is invalid", () => {
+    const body = {
+      id: "chatcmpl-bad",
+      model: "gpt-4o",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_bad",
+                type: "function",
+                function: {
+                  name: "broken",
+                  arguments: "not valid json{",
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+      usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+    };
+
+    const response = translateResponse(body);
+
+    expect(response.message.content).toEqual([
+      {
+        kind: "tool_call",
+        toolCall: {
+          id: "call_bad",
+          name: "broken",
+          arguments: {},
+          rawArguments: "not valid json{",
+        },
+      },
+    ]);
   });
 
   test("maps length finish reason", () => {

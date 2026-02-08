@@ -56,8 +56,9 @@ function translateContentPart(
     case "tool_result": {
       const functionName = toolCallIdMap.get(part.toolResult.toolCallId) ?? "";
       const content = part.toolResult.content;
-      const result =
-        typeof content === "string" ? { result: content } : content;
+      const result = part.toolResult.isError
+        ? { error: typeof content === "string" ? content : JSON.stringify(content) }
+        : typeof content === "string" ? { result: content } : content;
       return {
         functionResponse: {
           name: functionName,
@@ -206,12 +207,7 @@ export function translateRequest(request: Request): TranslatedRequest {
   }
 
   if (request.tools && request.tools.length > 0) {
-    const isNoneMode =
-      request.toolChoice !== undefined && request.toolChoice.mode === "none";
-
-    if (!isNoneMode) {
-      body.tools = translateTools(request.tools);
-    }
+    body.tools = translateTools(request.tools);
 
     if (request.toolChoice) {
       const translated = translateToolChoice(request.toolChoice);

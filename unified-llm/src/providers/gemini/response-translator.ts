@@ -44,12 +44,14 @@ function translatePart(
     const thoughtSignature = typeof part["thoughtSignature"] === "string"
       ? part["thoughtSignature"]
       : undefined;
+    const args = rec(functionCall["args"]) ?? {};
     return {
       kind: "tool_call",
       toolCall: {
         id,
         name: str(functionCall["name"]),
-        arguments: (rec(functionCall["args"]) ?? {}) as Record<string, unknown>,
+        arguments: args as Record<string, unknown>,
+        rawArguments: JSON.stringify(functionCall["args"] ?? {}),
         type: thoughtSignature,
       },
     };

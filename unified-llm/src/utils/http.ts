@@ -1,6 +1,7 @@
 import type { AdapterTimeout } from "../types/timeout.js";
 import type { RateLimitInfo } from "../types/response.js";
 import {
+  SDKError,
   ProviderError,
   NetworkError,
   RequestTimeoutError,
@@ -19,7 +20,7 @@ export interface HttpRequestOptions {
     body: unknown,
     provider: string,
     headers: Headers,
-  ) => ProviderError | undefined;
+  ) => SDKError | undefined;
   provider: string;
 }
 
@@ -56,6 +57,26 @@ function extractRateLimit(headers: Headers): RateLimitInfo | undefined {
     tokensLimit: tokensLimit !== null ? parseInt(tokensLimit, 10) : undefined,
     resetAt: resetAt !== null ? new Date(resetAt) : undefined,
   };
+}
+
+export function parseRetryAfterHeader(headers: Headers): number | undefined {
+  const value = headers.get("retry-after");
+  if (value === null) {
+    return undefined;
+  }
+  const seconds = Number(value);
+  if (!Number.isNaN(seconds) && seconds > 0) {
+    return seconds;
+  }
+  // Try HTTP-date format (e.g. "Fri, 31 Dec 1999 23:59:59 GMT")
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    const deltaMs = date.getTime() - Date.now();
+    if (deltaMs > 0) {
+      return deltaMs / 1000;
+    }
+  }
+  return undefined;
 }
 
 export async function httpRequest(
@@ -120,7 +141,7 @@ export async function httpRequest(
     const body = await response.json();
     return { status: response.status, headers: response.headers, body, rateLimit };
   } catch (error) {
-    if (error instanceof ProviderError) {
+    if (error instanceof SDKError) {
       throw error;
     }
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -213,7 +234,7 @@ export async function httpRequestStream(
     return { headers: response.headers, body: wrappedBody, rateLimit };
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error instanceof ProviderError || error instanceof NetworkError) {
+    if (error instanceof SDKError) {
       throw error;
     }
     if (error instanceof DOMException && error.name === "AbortError") {

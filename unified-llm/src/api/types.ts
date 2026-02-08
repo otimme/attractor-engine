@@ -37,5 +37,5 @@ export interface StreamResult {
   [Symbol.asyncIterator](): AsyncIterator<StreamEvent>;
   response(): Promise<Response>;
   partialResponse(): Response;
-  textStream(): AsyncGenerator<string>;
+  readonly textStream: AsyncGenerator<string>;
 }

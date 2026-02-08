@@ -4,6 +4,7 @@ import type { StreamEvent } from "../../types/stream-event.js";
 import type { ProviderAdapter } from "../../types/provider-adapter.js";
 import type { AdapterTimeout } from "../../types/timeout.js";
 import {
+  SDKError,
   AuthenticationError,
   AccessDeniedError,
   NotFoundError,
@@ -11,8 +12,12 @@ import {
   RateLimitError,
   ServerError,
   ContextLengthError,
+  ContentFilterError,
+  QuotaExceededError,
+  RequestTimeoutError,
   ProviderError,
 } from "../../types/errors.js";
+import { classifyByMessage } from "../../utils/error-classify.js";
 import { httpRequest, httpRequestStream } from "../../utils/http.js";
 import { parseSSE } from "../../utils/sse.js";
 import { str, rec } from "../../utils/extract.js";
@@ -49,7 +54,7 @@ function mapError(
   body: unknown,
   provider: string,
   headers: Headers,
-): ProviderError | undefined {
+): SDKError | undefined {
   const errorBody = rec(body);
   const errorObj = rec(errorBody?.["error"]);
   const message = str(errorObj?.["message"], typeof body === "string" ? body : "Unknown error");
@@ -63,8 +68,12 @@ function mapError(
     case 404:
       return new NotFoundError(message, provider, errorType, body);
     case 400: {
-      if (errorType === "invalid_request_error" && /context|token/.test(message)) {
+      const classification = classifyByMessage(message);
+      if (classification === "context_length") {
         return new ContextLengthError(message, provider, errorType, body);
+      }
+      if (classification === "content_filter") {
+        return new ContentFilterError(message, provider, errorType, body);
       }
       return new InvalidRequestError(message, provider, errorType, body);
     }
@@ -73,7 +82,7 @@ function mapError(
       return new RateLimitError(message, provider, errorType, retryAfter, body);
     }
     case 408:
-      return new ServerError(message, provider, errorType, 408, body);
+      return new RequestTimeoutError(message);
     case 413:
       return new ContextLengthError(message, provider, errorType, body);
     case 422:
@@ -84,8 +93,23 @@ function mapError(
       if (status >= 500) {
         return new ServerError(message, provider, errorType, status, body);
       }
-      return undefined;
+      break;
   }
+
+  const classification = classifyByMessage(message);
+  if (classification === "content_filter") {
+    return new ContentFilterError(message, provider, errorType, body);
+  }
+  if (classification === "quota") {
+    return new QuotaExceededError(message, provider, errorType, body);
+  }
+  if (classification === "not_found") {
+    return new NotFoundError(message, provider, errorType, body);
+  }
+  if (classification === "auth") {
+    return new AuthenticationError(message, provider, errorType, body);
+  }
+  return undefined;
 }
 
 export class AnthropicAdapter implements ProviderAdapter {

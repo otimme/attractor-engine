@@ -351,6 +351,170 @@ describe("generate", () => {
     expect(result.usage.inputTokens).toBe(20);
   });
 
+  test("tool argument validation returns error on schema mismatch", async () => {
+    const adapter = new StubAdapter("stub", [
+      {
+        response: makeResponse("", "tool_calls", [
+          { id: "tc-1", name: "typed_tool", arguments: { count: "not-a-number" } },
+        ]),
+      },
+      {
+        response: makeResponse("handled validation error"),
+      },
+    ]);
+    setup(adapter);
+
+    const result = await generate({
+      model: "test-model",
+      prompt: "use typed tool",
+      tools: [
+        {
+          name: "typed_tool",
+          description: "Needs a number",
+          parameters: { type: "object", properties: { count: { type: "number" } } },
+          execute: async () => "should not be called",
+        },
+      ],
+      client,
+    });
+
+    const firstStep = result.steps[0];
+    expect(firstStep?.toolResults[0]?.isError).toBe(true);
+    expect(firstStep?.toolResults[0]?.content).toContain("Tool argument validation failed");
+  });
+
+  test("tool argument validation passes for valid args", async () => {
+    const adapter = new StubAdapter("stub", [
+      {
+        response: makeResponse("", "tool_calls", [
+          { id: "tc-1", name: "typed_tool", arguments: { count: 42 } },
+        ]),
+      },
+      {
+        response: makeResponse("success"),
+      },
+    ]);
+    setup(adapter);
+
+    const result = await generate({
+      model: "test-model",
+      prompt: "use typed tool",
+      tools: [
+        {
+          name: "typed_tool",
+          description: "Needs a number",
+          parameters: { type: "object", properties: { count: { type: "number" } } },
+          execute: async () => "executed",
+        },
+      ],
+      client,
+    });
+
+    const firstStep = result.steps[0];
+    expect(firstStep?.toolResults[0]?.isError).toBe(false);
+    expect(firstStep?.toolResults[0]?.content).toBe("executed");
+  });
+
+  test("repairToolCall fixes invalid arguments", async () => {
+    const adapter = new StubAdapter("stub", [
+      {
+        response: makeResponse("", "tool_calls", [
+          { id: "tc-1", name: "typed_tool", arguments: { count: "bad" } },
+        ]),
+      },
+      {
+        response: makeResponse("repaired"),
+      },
+    ]);
+    setup(adapter);
+
+    let repairCalled = false;
+    const result = await generate({
+      model: "test-model",
+      prompt: "use typed tool",
+      tools: [
+        {
+          name: "typed_tool",
+          description: "Needs a number",
+          parameters: { type: "object", properties: { count: { type: "number" } } },
+          execute: async (args) => `count=${args["count"]}`,
+        },
+      ],
+      repairToolCall: async (_toolCall, _error) => {
+        repairCalled = true;
+        return { count: 99 };
+      },
+      client,
+    });
+
+    expect(repairCalled).toBe(true);
+    const firstStep = result.steps[0];
+    expect(firstStep?.toolResults[0]?.isError).toBe(false);
+    expect(firstStep?.toolResults[0]?.content).toBe("count=99");
+  });
+
+  test("execute receives ToolExecutionContext", async () => {
+    const adapter = new StubAdapter("stub", [
+      {
+        response: makeResponse("", "tool_calls", [
+          { id: "tc-1", name: "ctx_tool", arguments: { x: 1 } },
+        ]),
+      },
+      {
+        response: makeResponse("done"),
+      },
+    ]);
+    setup(adapter);
+
+    let receivedContext: unknown;
+    await generate({
+      model: "test-model",
+      prompt: "use ctx tool",
+      tools: [
+        {
+          name: "ctx_tool",
+          description: "Receives context",
+          parameters: { type: "object", properties: { x: { type: "number" } } },
+          execute: async (_args, context) => {
+            receivedContext = context;
+            return "ok";
+          },
+        },
+      ],
+      client,
+    });
+
+    expect(receivedContext).toBeDefined();
+    const ctx = receivedContext as { toolCallId: string; messages: unknown[] };
+    expect(ctx.toolCallId).toBe("tc-1");
+    expect(Array.isArray(ctx.messages)).toBe(true);
+  });
+
+  test("retryPolicy option is used instead of maxRetries", async () => {
+    let retryCalled = false;
+    const adapter = new StubAdapter("stub", [
+      { response: makeResponse("success") },
+    ]);
+    setup(adapter);
+
+    const result = await generate({
+      model: "test-model",
+      prompt: "hello",
+      retryPolicy: {
+        maxRetries: 0,
+        baseDelay: 0.001,
+        maxDelay: 1.0,
+        backoffMultiplier: 1.0,
+        jitter: false,
+        onRetry: () => { retryCalled = true; },
+      },
+      client,
+    });
+
+    expect(result.text).toBe("success");
+    expect(retryCalled).toBe(false);
+  });
+
   test("total timeout throws RequestTimeoutError", async () => {
     const adapter = new StubAdapter("stub", [
       {

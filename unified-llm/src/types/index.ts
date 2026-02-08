@@ -14,7 +14,9 @@ export type {
   ToolResultPart,
   ThinkingPart,
   RedactedThinkingPart,
+  CustomPart,
   ContentPart,
+  ExtendedContentPart,
 } from "./content-part.js";
 export {
   isTextPart,
@@ -25,6 +27,7 @@ export {
   isToolResultPart,
   isThinkingPart,
   isRedactedThinkingPart,
+  isCustomPart,
 } from "./content-part.js";
 export type { Message } from "./message.js";
 export {
@@ -95,4 +98,5 @@ export {
   InvalidToolCallError,
   NoObjectGeneratedError,
   ConfigurationError,
+  UnsupportedToolChoiceError,
 } from "./errors.js";

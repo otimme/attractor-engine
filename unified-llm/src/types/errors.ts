@@ -171,3 +171,19 @@ export class ConfigurationError extends SDKError {
     this.name = "ConfigurationError";
   }
 }
+
+export class UnsupportedToolChoiceError extends SDKError {
+  readonly provider: string;
+  readonly mode: string;
+
+  constructor(provider: string, mode: string, options?: ErrorOptions) {
+    super(
+      `Provider "${provider}" does not support tool choice mode "${mode}"`,
+      false,
+      options,
+    );
+    this.name = "UnsupportedToolChoiceError";
+    this.provider = provider;
+    this.mode = mode;
+  }
+}

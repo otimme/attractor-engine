@@ -1,4 +1,4 @@
-export { httpRequest, httpRequestStream } from "./http.js";
+export { httpRequest, httpRequestStream, parseRetryAfterHeader } from "./http.js";
 export type { HttpRequestOptions, HttpResponse } from "./http.js";
 export { parseSSE } from "./sse.js";
 export type { SSEEvent } from "./sse.js";
@@ -12,3 +12,5 @@ export { readImageFile, isLocalFilePath } from "./file-image.js";
 export type { FileImageResult } from "./file-image.js";
 export { resolveFileImages } from "./resolve-file-images.js";
 export { validateJsonSchema } from "./validate-json-schema.js";
+export { classifyByMessage } from "./error-classify.js";
+export { validateToolName } from "./validate-tool-name.js";

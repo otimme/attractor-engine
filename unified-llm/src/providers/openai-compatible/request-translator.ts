@@ -111,10 +111,13 @@ function translateMessage(
   } else if (message.role === Role.TOOL) {
     for (const part of message.content) {
       if (isToolResultPart(part)) {
-        const content =
+        let content =
           typeof part.toolResult.content === "string"
             ? part.toolResult.content
             : JSON.stringify(part.toolResult.content);
+        if (part.toolResult.isError) {
+          content = `Error: ${content}`;
+        }
         results.push({
           role: "tool",
           tool_call_id: part.toolResult.toolCallId,

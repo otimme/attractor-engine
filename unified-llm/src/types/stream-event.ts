@@ -24,59 +24,70 @@ export interface StreamStartEvent {
   type: typeof StreamEventType.STREAM_START;
   id?: string;
   model?: string;
+  raw?: unknown;
 }
 
 export interface TextStartEvent {
   type: typeof StreamEventType.TEXT_START;
   textId?: string;
+  raw?: unknown;
 }
 
 export interface TextDeltaEvent {
   type: typeof StreamEventType.TEXT_DELTA;
   delta: string;
   textId?: string;
+  raw?: unknown;
 }
 
 export interface TextEndEvent {
   type: typeof StreamEventType.TEXT_END;
   textId?: string;
+  raw?: unknown;
 }
 
 export interface ReasoningStartEvent {
   type: typeof StreamEventType.REASONING_START;
+  raw?: unknown;
 }
 
 export interface ReasoningDeltaEvent {
   type: typeof StreamEventType.REASONING_DELTA;
   reasoningDelta: string;
+  raw?: unknown;
 }
 
 export interface ReasoningEndEvent {
   type: typeof StreamEventType.REASONING_END;
   signature?: string;
+  raw?: unknown;
 }
 
 export interface ToolCallStartEvent {
   type: typeof StreamEventType.TOOL_CALL_START;
   toolCallId: string;
   toolName: string;
+  raw?: unknown;
 }
 
 export interface ToolCallDeltaEvent {
   type: typeof StreamEventType.TOOL_CALL_DELTA;
   toolCallId: string;
   argumentsDelta: string;
+  raw?: unknown;
 }
 
 export interface ToolCallEndEvent {
   type: typeof StreamEventType.TOOL_CALL_END;
   toolCallId: string;
+  raw?: unknown;
 }
 
 export interface StepFinishEvent {
   type: typeof StreamEventType.STEP_FINISH;
   finishReason: FinishReason;
   usage?: Usage;
+  raw?: unknown;
 }
 
 export interface FinishEvent {
@@ -84,17 +95,20 @@ export interface FinishEvent {
   finishReason: FinishReason;
   usage?: Usage;
   response?: Response;
+  raw?: unknown;
 }
 
 export interface ErrorEvent {
   type: typeof StreamEventType.ERROR;
   error: Error;
+  raw?: unknown;
 }
 
 export interface ProviderEvent {
   type: typeof StreamEventType.PROVIDER_EVENT;
   eventType: string;
   data: unknown;
+  raw?: unknown;
 }
 
 export type StreamEvent =

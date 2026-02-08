@@ -65,6 +65,42 @@ describe("addUsage", () => {
     expect(result.cacheWriteTokens).toBeUndefined();
   });
 
+  test("preserves raw from second operand (latest wins)", () => {
+    const a: Usage = {
+      inputTokens: 10,
+      outputTokens: 20,
+      totalTokens: 30,
+      raw: { step: 1 },
+    };
+    const b: Usage = {
+      inputTokens: 5,
+      outputTokens: 15,
+      totalTokens: 20,
+      raw: { step: 2 },
+    };
+    const result = addUsage(a, b);
+    expect(result.raw).toEqual({ step: 2 });
+  });
+
+  test("keeps raw from first operand when second has none", () => {
+    const a: Usage = {
+      inputTokens: 10,
+      outputTokens: 20,
+      totalTokens: 30,
+      raw: { step: 1 },
+    };
+    const b: Usage = { inputTokens: 5, outputTokens: 15, totalTokens: 20 };
+    const result = addUsage(a, b);
+    expect(result.raw).toEqual({ step: 1 });
+  });
+
+  test("raw is undefined when neither operand has it", () => {
+    const a: Usage = { inputTokens: 10, outputTokens: 20, totalTokens: 30 };
+    const b: Usage = { inputTokens: 5, outputTokens: 15, totalTokens: 20 };
+    const result = addUsage(a, b);
+    expect(result.raw).toBeUndefined();
+  });
+
   test("leaves optional fields undefined when neither is present", () => {
     const a: Usage = { inputTokens: 10, outputTokens: 20, totalTokens: 30 };
     const b: Usage = { inputTokens: 10, outputTokens: 20, totalTokens: 30 };
@@ -122,8 +158,8 @@ describe("responseReasoning", () => {
     expect(responseReasoning(resp)).toBe("Let me think about this...");
   });
 
-  test("returns empty string when no reasoning", () => {
+  test("returns undefined when no reasoning", () => {
     const resp = makeResponse([{ kind: "text", text: "answer" }]);
-    expect(responseReasoning(resp)).toBe("");
+    expect(responseReasoning(resp)).toBeUndefined();
   });
 });

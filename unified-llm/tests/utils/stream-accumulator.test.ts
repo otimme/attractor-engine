@@ -130,6 +130,28 @@ describe("StreamAccumulator", () => {
     expect(response.message.content[1]?.kind).toBe("tool_call");
   });
 
+  test("response has empty warnings by default", () => {
+    const acc = new StreamAccumulator();
+    acc.process({ type: StreamEventType.STREAM_START, model: "test-model" });
+    acc.process({ type: StreamEventType.FINISH, finishReason: { reason: "stop" } });
+
+    const response = acc.response();
+    expect(response.warnings).toEqual([]);
+  });
+
+  test("addWarning accumulates warnings into response", () => {
+    const acc = new StreamAccumulator();
+    acc.process({ type: StreamEventType.STREAM_START, model: "test-model" });
+    acc.addWarning({ message: "Deprecated model", code: "DEPRECATED" });
+    acc.addWarning({ message: "Slow response" });
+    acc.process({ type: StreamEventType.FINISH, finishReason: { reason: "stop" } });
+
+    const response = acc.response();
+    expect(response.warnings).toHaveLength(2);
+    expect(response.warnings[0]).toEqual({ message: "Deprecated model", code: "DEPRECATED" });
+    expect(response.warnings[1]).toEqual({ message: "Slow response" });
+  });
+
   test("captures id and provider", () => {
     const acc = new StreamAccumulator("anthropic");
     acc.process({ type: StreamEventType.STREAM_START, id: "msg_123", model: "claude-opus-4-6" });

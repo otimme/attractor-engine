@@ -59,6 +59,7 @@ describe("Anthropic response translator", () => {
           id: "tc1",
           name: "get_weather",
           arguments: { city: "NYC" },
+          rawArguments: '{"city":"NYC"}',
         },
       },
     ]);
@@ -124,6 +125,33 @@ describe("Anthropic response translator", () => {
       },
       { kind: "text", text: "Here's my answer." },
     ]);
+  });
+
+  test("populates rawArguments on tool_use blocks", () => {
+    const body = {
+      id: "msg_raw",
+      model: "claude-opus-4-6",
+      type: "message",
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "tc1",
+          name: "test_tool",
+          input: { key: "value" },
+        },
+      ],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    };
+
+    const response = translateResponse(body);
+    const part = response.message.content[0];
+
+    expect(part?.kind).toBe("tool_call");
+    if (part?.kind === "tool_call") {
+      expect(part.toolCall.rawArguments).toBe('{"key":"value"}');
+    }
   });
 
   test("maps end_turn to stop", () => {

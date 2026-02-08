@@ -5,7 +5,7 @@ export type { StreamOptions } from "./stream.js";
 export { generateObject, generateObjectWithJsonSchema } from "./generate-object.js";
 export type { GenerateObjectOptions } from "./generate-object.js";
 export { streamObject, streamObjectWithJsonSchema } from "./stream-object.js";
-export type { StreamObjectOptions } from "./stream-object.js";
+export type { StreamObjectOptions, StreamObjectResult } from "./stream-object.js";
 export type {
   StepResult,
   GenerateResult,

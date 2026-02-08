@@ -61,7 +61,7 @@ describe("stream", () => {
     });
 
     const texts: string[] = [];
-    for await (const text of result.textStream()) {
+    for await (const text of result.textStream) {
       texts.push(text);
     }
 
@@ -130,7 +130,7 @@ describe("stream", () => {
     });
 
     const texts: string[] = [];
-    for await (const text of result.textStream()) {
+    for await (const text of result.textStream) {
       texts.push(text);
     }
 

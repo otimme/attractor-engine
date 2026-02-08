@@ -31,6 +31,7 @@ function translateContentBlock(block: Record<string, unknown>): ContentPart | un
           id: str(block["id"]),
           name: str(block["name"]),
           arguments: recOrEmpty(block["input"]),
+          rawArguments: JSON.stringify(block["input"] ?? {}),
         },
       };
     case "thinking":

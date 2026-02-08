@@ -65,6 +65,7 @@ export function addUsage(a: Usage, b: Usage): Usage {
       a.cacheWriteTokens !== undefined || b.cacheWriteTokens !== undefined
         ? (a.cacheWriteTokens ?? 0) + (b.cacheWriteTokens ?? 0)
         : undefined,
+    raw: b.raw ?? a.raw,
   };
 }
 
@@ -81,9 +82,10 @@ export function responseToolCalls(response: Response): ToolCallData[] {
     .map((part) => part.toolCall);
 }
 
-export function responseReasoning(response: Response): string {
-  return response.message.content
-    .filter(isThinkingPart)
-    .map((part) => part.thinking.text)
-    .join("");
+export function responseReasoning(response: Response): string | undefined {
+  const parts = response.message.content.filter(isThinkingPart);
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return parts.map((part) => part.thinking.text).join("");
 }

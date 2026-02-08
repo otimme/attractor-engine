@@ -79,15 +79,14 @@ export function translateResponse(
         typeof fn["arguments"] === "string" ? fn["arguments"] : "{}";
       const parsed = safeJsonParse(rawArgs);
       const parsedRecord = parsed.success ? rec(parsed.value) : undefined;
-      const parsedArgs: Record<string, unknown> | string =
-        parsedRecord ?? rawArgs;
 
       contentParts.push({
         kind: "tool_call",
         toolCall: {
           id: str(tc["id"]),
           name: str(fn["name"]),
-          arguments: parsedArgs,
+          arguments: parsedRecord ?? {},
+          rawArguments: rawArgs,
         },
       });
     }

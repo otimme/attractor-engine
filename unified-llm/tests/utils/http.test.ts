@@ -1,7 +1,50 @@
 import { describe, test, expect, setDefaultTimeout } from "bun:test";
 
 setDefaultTimeout(15_000);
-import { httpRequest, httpRequestStream } from "../../src/utils/http.js";
+import { httpRequest, httpRequestStream, parseRetryAfterHeader } from "../../src/utils/http.js";
+
+describe("parseRetryAfterHeader", () => {
+  test("returns undefined when no retry-after header", () => {
+    const headers = new Headers();
+    expect(parseRetryAfterHeader(headers)).toBeUndefined();
+  });
+
+  test("parses seconds format", () => {
+    const headers = new Headers({ "retry-after": "30" });
+    expect(parseRetryAfterHeader(headers)).toBe(30);
+  });
+
+  test("returns undefined for zero seconds", () => {
+    const headers = new Headers({ "retry-after": "0" });
+    expect(parseRetryAfterHeader(headers)).toBeUndefined();
+  });
+
+  test("returns undefined for negative seconds", () => {
+    const headers = new Headers({ "retry-after": "-5" });
+    expect(parseRetryAfterHeader(headers)).toBeUndefined();
+  });
+
+  test("parses HTTP-date format (future date)", () => {
+    const futureDate = new Date(Date.now() + 60_000);
+    const headers = new Headers({ "retry-after": futureDate.toUTCString() });
+    const result = parseRetryAfterHeader(headers);
+    expect(result).toBeDefined();
+    // Should be roughly 60 seconds, allow some tolerance
+    expect(result).toBeGreaterThan(55);
+    expect(result).toBeLessThanOrEqual(61);
+  });
+
+  test("returns undefined for HTTP-date in the past", () => {
+    const pastDate = new Date(Date.now() - 60_000);
+    const headers = new Headers({ "retry-after": pastDate.toUTCString() });
+    expect(parseRetryAfterHeader(headers)).toBeUndefined();
+  });
+
+  test("returns undefined for non-parseable value", () => {
+    const headers = new Headers({ "retry-after": "not-a-number-or-date" });
+    expect(parseRetryAfterHeader(headers)).toBeUndefined();
+  });
+});
 
 describe("httpRequestStream", () => {
   test("stream read timeout fires when chunks stop arriving", async () => {
