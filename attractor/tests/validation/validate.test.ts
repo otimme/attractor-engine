@@ -188,21 +188,39 @@ describe("condition_syntax rule", () => {
 });
 
 describe("stylesheet_syntax rule", () => {
-  test("balanced braces produce no error", () => {
+  test("valid stylesheet with recognized properties produces no errors", () => {
     const graph = makeGraph(
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
         makeNode("done", { shape: stringAttr("Msquare") }),
       ],
       [makeEdge("start", "done")],
-      { model_stylesheet: stringAttr("node { model: gpt-4; }") },
+      { model_stylesheet: stringAttr("* { llm_model: gpt-4; }") },
     );
     const diags = validate(graph);
-    const ssErrors = diags.filter((d) => d.rule === "stylesheet_syntax");
+    const ssErrors = diags.filter(
+      (d) => d.rule === "stylesheet_syntax" && d.severity === "error",
+    );
     expect(ssErrors.length).toBe(0);
   });
 
-  test("unbalanced braces produce error", () => {
+  test("unrecognized property produces warning", () => {
+    const graph = makeGraph(
+      [
+        makeNode("start", { shape: stringAttr("Mdiamond") }),
+        makeNode("done", { shape: stringAttr("Msquare") }),
+      ],
+      [makeEdge("start", "done")],
+      { model_stylesheet: stringAttr("* { unknown_prop: value; }") },
+    );
+    const diags = validate(graph);
+    const ssWarnings = diags.filter(
+      (d) => d.rule === "stylesheet_syntax" && d.severity === "warning",
+    );
+    expect(ssWarnings.length).toBe(1);
+  });
+
+  test("unparseable stylesheet produces error", () => {
     const graph = makeGraph(
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
@@ -212,7 +230,9 @@ describe("stylesheet_syntax rule", () => {
       { model_stylesheet: stringAttr("node { model: gpt-4;") },
     );
     const diags = validate(graph);
-    const ssErrors = diags.filter((d) => d.rule === "stylesheet_syntax");
+    const ssErrors = diags.filter(
+      (d) => d.rule === "stylesheet_syntax" && d.severity === "error",
+    );
     expect(ssErrors.length).toBe(1);
   });
 });

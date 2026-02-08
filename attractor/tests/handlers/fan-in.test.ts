@@ -9,12 +9,12 @@ function makeNode(id: string): Node {
 }
 
 function makeGraph(): Graph {
-  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [] };
+  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] };
 }
 
-function makeResults(entries: Array<{ nodeId: string; status: string }>): string {
+function makeResults(entries: Array<{ nodeId: string; status: string; score?: number }>): string {
   return JSON.stringify(
-    entries.map((e) => ({ nodeId: e.nodeId, status: e.status, notes: "", contextUpdates: {} })),
+    entries.map((e) => ({ nodeId: e.nodeId, status: e.status, notes: "", score: e.score ?? 0, contextUpdates: {} })),
   );
 }
 
@@ -89,6 +89,21 @@ describe("FanInHandler", () => {
 
     const outcome = await handler.execute(makeNode("fanin"), context, makeGraph(), "/tmp");
     expect(outcome.status).toBe(StageStatus.SUCCESS);
+    expect(outcome.contextUpdates["parallel.fan_in.best_id"]).toBe("b");
+  });
+
+  it("breaks ties by score descending before node id", async () => {
+    const handler = new FanInHandler();
+    const context = new Context();
+    context.set(
+      "parallel.results",
+      makeResults([
+        { nodeId: "a", status: StageStatus.SUCCESS, score: 80 },
+        { nodeId: "b", status: StageStatus.SUCCESS, score: 95 },
+      ]),
+    );
+
+    const outcome = await handler.execute(makeNode("fanin"), context, makeGraph(), "/tmp");
     expect(outcome.contextUpdates["parallel.fan_in.best_id"]).toBe("b");
   });
 });

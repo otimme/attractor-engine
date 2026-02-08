@@ -8,6 +8,7 @@ import {
 import type { Diagnostic, LintRule } from "../types/diagnostic.js";
 import { Severity, createDiagnostic } from "../types/diagnostic.js";
 import { isValidFidelityMode } from "../types/fidelity.js";
+import { parseStylesheet } from "../stylesheet/parser.js";
 
 // -- Shape / type constants --
 
@@ -258,10 +259,13 @@ const conditionSyntaxRule: LintRule = {
   },
 };
 
-/**
- * Basic stylesheet syntax check: balanced braces.
- * A full parser may provide deeper validation later.
- */
+/** Recognized model-related property names for stylesheet declarations. */
+const KNOWN_STYLESHEET_PROPERTIES = new Set([
+  "llm_model",
+  "llm_provider",
+  "reasoning_effort",
+]);
+
 function hasBalancedBraces(text: string): boolean {
   let depth = 0;
   for (const ch of text) {
@@ -277,6 +281,8 @@ const stylesheetSyntaxRule: LintRule = {
   apply(graph: Graph): Diagnostic[] {
     const stylesheet = getStringAttr(graph.attributes, "model_stylesheet");
     if (stylesheet === "") return [];
+
+    // Check balanced braces first (parser is permissive about this)
     if (!hasBalancedBraces(stylesheet)) {
       return [
         createDiagnostic({
@@ -287,7 +293,51 @@ const stylesheetSyntaxRule: LintRule = {
         }),
       ];
     }
-    return [];
+
+    let rules;
+    try {
+      rules = parseStylesheet(stylesheet);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return [
+        createDiagnostic({
+          rule: "stylesheet_syntax",
+          severity: Severity.ERROR,
+          message: `model_stylesheet parse error: ${message}`,
+          fix: "Fix the stylesheet syntax.",
+        }),
+      ];
+    }
+
+    if (rules.length === 0 && stylesheet.trim() !== "") {
+      return [
+        createDiagnostic({
+          rule: "stylesheet_syntax",
+          severity: Severity.ERROR,
+          message: "model_stylesheet could not be parsed into any rules.",
+          fix: "Check the stylesheet syntax: selector { property: value; }",
+        }),
+      ];
+    }
+
+    // Warn about unrecognized property names
+    const diagnostics: Diagnostic[] = [];
+    for (const rule of rules) {
+      for (const decl of rule.declarations) {
+        if (!KNOWN_STYLESHEET_PROPERTIES.has(decl.property)) {
+          diagnostics.push(
+            createDiagnostic({
+              rule: "stylesheet_syntax",
+              severity: Severity.WARNING,
+              message: `Unrecognized stylesheet property "${decl.property}".`,
+              fix: `Known properties: ${[...KNOWN_STYLESHEET_PROPERTIES].join(", ")}.`,
+            }),
+          );
+        }
+      }
+    }
+
+    return diagnostics;
   },
 };
 

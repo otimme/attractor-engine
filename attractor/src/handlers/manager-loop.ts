@@ -4,7 +4,12 @@ import type { Handler } from "../types/handler.js";
 import type { Node, Graph } from "../types/graph.js";
 import type { Context } from "../types/context.js";
 import type { Outcome } from "../types/outcome.js";
-import { getStringAttr, getIntegerAttr } from "../types/graph.js";
+import {
+  getStringAttr,
+  getIntegerAttr,
+  getBooleanAttr,
+  getDurationAttr,
+} from "../types/graph.js";
 import { StageStatus, createOutcome } from "../types/outcome.js";
 import { evaluateCondition } from "../conditions/evaluator.js";
 import type { Checkpoint } from "../types/checkpoint.js";
@@ -69,6 +74,7 @@ function createInProcessSpawner(
         currentNode: result.completedNodes[result.completedNodes.length - 1] ?? "",
         completedNodes: result.completedNodes,
         nodeRetries: {},
+        nodeOutcomes: {},
         contextValues: result.context.snapshot(),
         logs: [],
       };
@@ -102,6 +108,9 @@ export interface ManagerLoopHandlerConfig {
   runnerFactory?: PipelineRunnerFactory;
 }
 
+const DEFAULT_POLL_INTERVAL_MS = 45_000;
+const DEFAULT_STEER_COOLDOWN_MS = 90_000; // 2 poll cycles at default interval
+
 export class ManagerLoopHandler implements Handler {
   private readonly spawner: ChildProcessSpawner;
 
@@ -118,10 +127,11 @@ export class ManagerLoopHandler implements Handler {
   async execute(
     node: Node,
     context: Context,
-    _graph: Graph,
+    graph: Graph,
     logsRoot: string,
   ): Promise<Outcome> {
-    const dotFile = getStringAttr(node.attributes, "stack.child_dotfile");
+    // L5: Read stack.child_dotfile from graph attributes per spec
+    const dotFile = getStringAttr(graph.attributes, "stack.child_dotfile");
     if (dotFile === "") {
       return createOutcome({
         status: StageStatus.FAIL,
@@ -129,8 +139,9 @@ export class ManagerLoopHandler implements Handler {
       });
     }
 
+    // L6: Parse poll_interval as a duration value
     const pollIntervalMs =
-      getIntegerAttr(node.attributes, "manager.poll_interval", 45) * 1000;
+      getDurationAttr(node.attributes, "manager.poll_interval") ?? DEFAULT_POLL_INTERVAL_MS;
     const maxCycles = getIntegerAttr(
       node.attributes,
       "manager.max_cycles",
@@ -147,8 +158,26 @@ export class ManagerLoopHandler implements Handler {
     );
     const actions = actionsStr.split(",").map((a) => a.trim());
 
-    // Start child subprocess
-    const child = this.spawner(dotFile, logsRoot);
+    // L7: Steer cooldown
+    const steerCooldownMs =
+      getDurationAttr(node.attributes, "manager.steer_cooldown") ?? DEFAULT_STEER_COOLDOWN_MS;
+    let lastSteerTime = 0;
+
+    // M7: Check child_autostart attribute (default true)
+    const autostart = getBooleanAttr(node.attributes, "stack.child_autostart", true);
+
+    // Start child subprocess only if autostart is true
+    let child: ChildProcess | undefined;
+    if (autostart) {
+      child = this.spawner(dotFile, logsRoot);
+    }
+
+    if (!child) {
+      return createOutcome({
+        status: StageStatus.FAIL,
+        failureReason: `Node ${node.id}: child not started (autostart disabled and no external child)`,
+      });
+    }
 
     let childCompleted = false;
     let childExitCode = -1;
@@ -177,10 +206,22 @@ export class ManagerLoopHandler implements Handler {
               const raw = readFileSync(checkpointPath, "utf-8");
               const checkpoint: unknown = JSON.parse(raw);
               if (isCheckpointLike(checkpoint)) {
-                context.set(
-                  "stack.child.status",
-                  checkpoint.currentNode,
-                );
+                // M8: Set status to "completed"/"failed" based on child state
+                const childOutcomeValue = checkpoint.contextValues["outcome"];
+                if (childCompleted || childOutcomeValue === "success" || childOutcomeValue === "fail") {
+                  const isSuccess = childExitCode === 0 || childOutcomeValue === "success";
+                  context.set(
+                    "stack.child.status",
+                    isSuccess ? "completed" : "failed",
+                  );
+                  context.set(
+                    "stack.child.outcome",
+                    isSuccess ? "success" : "fail",
+                  );
+                } else {
+                  context.set("stack.child.status", "running");
+                }
+
                 context.set(
                   "stack.child.completedNodes",
                   checkpoint.completedNodes.join(","),
@@ -203,24 +244,49 @@ export class ManagerLoopHandler implements Handler {
           }
         }
 
-        // steer: write intervention file
+        // steer: write intervention file (with cooldown)
         if (actions.includes("steer")) {
-          const interventionDir = child.childLogsRoot;
-          mkdirSync(interventionDir, { recursive: true });
-          const interventionPath = join(
-            interventionDir,
-            "intervention.json",
-          );
-          const intervention = {
-            timestamp: new Date().toISOString(),
-            cycle,
-            source: node.id,
-          };
-          writeFileSync(
-            interventionPath,
-            JSON.stringify(intervention, null, 2),
-            "utf-8",
-          );
+          const now = Date.now();
+          if (now - lastSteerTime >= steerCooldownMs) {
+            lastSteerTime = now;
+            const interventionDir = child.childLogsRoot;
+            mkdirSync(interventionDir, { recursive: true });
+            const interventionPath = join(
+              interventionDir,
+              "intervention.json",
+            );
+            const intervention = {
+              timestamp: new Date().toISOString(),
+              cycle,
+              source: node.id,
+            };
+            writeFileSync(
+              interventionPath,
+              JSON.stringify(intervention, null, 2),
+              "utf-8",
+            );
+          }
+        }
+
+        // Evaluate child status from context per spec
+        const childStatus = context.getString("stack.child.status");
+        if (childStatus === "completed" || childStatus === "failed") {
+          const childOutcome = context.getString("stack.child.outcome");
+          if (childOutcome === "success") {
+            child.kill();
+            return createOutcome({
+              status: StageStatus.SUCCESS,
+              contextUpdates: { last_stage: node.id },
+              notes: `Manager ${node.id}: child completed successfully`,
+            });
+          }
+          if (childStatus === "failed") {
+            child.kill();
+            return createOutcome({
+              status: StageStatus.FAIL,
+              failureReason: `Manager ${node.id}: child pipeline failed`,
+            });
+          }
         }
 
         // evaluate stop condition
@@ -232,16 +298,18 @@ export class ManagerLoopHandler implements Handler {
             child.kill();
             return createOutcome({
               status: StageStatus.SUCCESS,
+              contextUpdates: { last_stage: node.id },
               notes: `Manager ${node.id}: stop condition met at cycle ${cycle}`,
             });
           }
         }
 
-        // check if child completed or failed
+        // check if child completed or failed (process level)
         if (childCompleted) {
           if (childExitCode === 0) {
             return createOutcome({
               status: StageStatus.SUCCESS,
+              contextUpdates: { last_stage: node.id },
               notes: `Manager ${node.id}: child completed successfully`,
             });
           }
@@ -249,30 +317,6 @@ export class ManagerLoopHandler implements Handler {
             status: StageStatus.FAIL,
             failureReason: `Manager ${node.id}: child exited with code ${String(childExitCode)}`,
           });
-        }
-
-        // Check checkpoint for terminal state
-        const checkpointPath = join(
-          child.childLogsRoot,
-          "checkpoint.json",
-        );
-        if (existsSync(checkpointPath)) {
-          try {
-            const raw = readFileSync(checkpointPath, "utf-8");
-            const checkpoint: unknown = JSON.parse(raw);
-            if (isCheckpointLike(checkpoint)) {
-              const outcome = checkpoint.contextValues["outcome"];
-              if (outcome === "fail") {
-                child.kill();
-                return createOutcome({
-                  status: StageStatus.FAIL,
-                  failureReason: `Manager ${node.id}: child pipeline failed`,
-                });
-              }
-            }
-          } catch {
-            // non-fatal
-          }
         }
 
         // wait
@@ -300,15 +344,21 @@ export class ManagerLoopHandler implements Handler {
   }
 }
 
+function hasProp<K extends string>(obj: object, key: K): obj is Record<K, unknown> {
+  return key in obj;
+}
+
 function isCheckpointLike(
   data: unknown,
 ): data is Checkpoint {
   if (typeof data !== "object" || data === null) return false;
-  const obj = data as Record<string, unknown>;
   return (
-    typeof obj["currentNode"] === "string" &&
-    Array.isArray(obj["completedNodes"]) &&
-    typeof obj["contextValues"] === "object" &&
-    obj["contextValues"] !== null
+    hasProp(data, "currentNode") &&
+    typeof data.currentNode === "string" &&
+    hasProp(data, "completedNodes") &&
+    Array.isArray(data.completedNodes) &&
+    hasProp(data, "contextValues") &&
+    typeof data.contextValues === "object" &&
+    data.contextValues !== null
   );
 }

@@ -32,6 +32,7 @@ export class ConsoleInterviewer implements Interviewer {
       input: this.input,
       output: this.output,
     });
+    const effectiveTimeoutMs = this.effectiveTimeoutMs(question);
     try {
       const defaultSuffix = question.defaultAnswer
         ? ` ${DIM}[default: ${question.defaultAnswer.value}]${RESET}`
@@ -39,14 +40,14 @@ export class ConsoleInterviewer implements Interviewer {
       this.log(`${BOLD}[?] ${question.text}${RESET}${defaultSuffix}`);
 
       if (question.type === QuestionType.MULTIPLE_CHOICE) {
-        return await this.askMultipleChoice(rl, question);
+        return await this.askMultipleChoice(rl, question, effectiveTimeoutMs);
       }
 
       if (
         question.type === QuestionType.YES_NO ||
         question.type === QuestionType.CONFIRMATION
       ) {
-        const response = await this.prompt(rl, `${CYAN}[Y/N]: ${RESET}`);
+        const response = await this.prompt(rl, `${CYAN}[Y/N]: ${RESET}`, effectiveTimeoutMs);
         if (response === "" && question.defaultAnswer) {
           return question.defaultAnswer;
         }
@@ -56,7 +57,7 @@ export class ConsoleInterviewer implements Interviewer {
       }
 
       // FREEFORM
-      const response = await this.prompt(rl, `${CYAN}> ${RESET}`);
+      const response = await this.prompt(rl, `${CYAN}> ${RESET}`, effectiveTimeoutMs);
       if (response === "" && question.defaultAnswer) {
         return question.defaultAnswer;
       }
@@ -81,6 +82,7 @@ export class ConsoleInterviewer implements Interviewer {
   private async askMultipleChoice(
     rl: readline.Interface,
     question: Question,
+    effectiveTimeoutMs: number | undefined,
   ): Promise<Answer> {
     question.options.forEach((option) => {
       this.log(`  ${DIM}[${option.key}] ${option.label}${RESET}`);
@@ -90,7 +92,7 @@ export class ConsoleInterviewer implements Interviewer {
     while (retries < MAX_RETRIES) {
       let response: string;
       try {
-        response = await this.prompt(rl, `${CYAN}Select: ${RESET}`);
+        response = await this.prompt(rl, `${CYAN}Select: ${RESET}`, effectiveTimeoutMs);
       } catch (err) {
         if (err instanceof InputClosedError) {
           break;
@@ -120,9 +122,17 @@ export class ConsoleInterviewer implements Interviewer {
     return createAnswer({ value: "", text: "" });
   }
 
+  private effectiveTimeoutMs(question: Question): number | undefined {
+    if (question.timeoutSeconds !== undefined) {
+      return question.timeoutSeconds * 1000;
+    }
+    return this.timeoutMs;
+  }
+
   private async prompt(
     rl: readline.Interface,
     promptText: string,
+    timeoutMs: number | undefined,
   ): Promise<string> {
     let questionPromise: Promise<string>;
     try {
@@ -131,12 +141,12 @@ export class ConsoleInterviewer implements Interviewer {
       throw new InputClosedError();
     }
 
-    if (this.timeoutMs === undefined) {
+    if (timeoutMs === undefined) {
       return questionPromise;
     }
 
     const timeoutPromise = new Promise<typeof TIMEOUT_SENTINEL>((resolve) => {
-      setTimeout(() => resolve(TIMEOUT_SENTINEL), this.timeoutMs);
+      setTimeout(() => resolve(TIMEOUT_SENTINEL), timeoutMs);
     });
 
     const result = await Promise.race([questionPromise, timeoutPromise]);

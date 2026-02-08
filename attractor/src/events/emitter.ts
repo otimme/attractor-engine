@@ -8,8 +8,12 @@ interface Consumer {
 
 export class PipelineEventEmitter {
   private consumers: Consumer[] = [];
+  onEvent: ((event: PipelineEvent) => void) | undefined;
 
   emit(event: PipelineEvent): void {
+    if (this.onEvent) {
+      this.onEvent(event);
+    }
     for (const consumer of this.consumers) {
       if (consumer.closed) continue;
 

@@ -493,7 +493,7 @@ describe("Context updates: visible across nodes", () => {
           });
         }
         if (node.id === "reader") {
-          readerContextValue = context.get("my.value");
+          readerContextValue = context.getString("my.value");
         }
         return "done";
       },

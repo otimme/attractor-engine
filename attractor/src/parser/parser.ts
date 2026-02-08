@@ -26,6 +26,7 @@ interface Scope {
   edgeDefaults: Map<string, AttributeValue>;
   derivedClasses: string[];
   isSubgraph: boolean;
+  subgraphId: string | undefined;
 }
 
 const EOF_TOKEN: Token = { kind: TokenKind.EOF, value: "", line: 0, column: 0 };
@@ -88,6 +89,7 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
     attributes: new Map(),
     nodes: new Map(),
     edges: [],
+    subgraphs: [],
   };
 
   const rootScope: Scope = {
@@ -95,6 +97,7 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
     edgeDefaults: new Map(),
     derivedClasses: [],
     isSubgraph: false,
+    subgraphId: undefined,
   };
 
   parseStatements(graph, rootScope);
@@ -194,7 +197,9 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
     expect(TokenKind.SUBGRAPH);
 
     // Optional identifier
+    let subgraphName = "";
     if (check(TokenKind.IDENTIFIER)) {
+      subgraphName = current().value;
       pos++; // consume the subgraph name
     }
 
@@ -206,6 +211,7 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
       edgeDefaults: new Map(parentScope.edgeDefaults),
       derivedClasses: [...parentScope.derivedClasses],
       isSubgraph: true,
+      subgraphId: subgraphName || undefined,
     };
 
     // Track which nodes existed before parsing the subgraph body
@@ -214,6 +220,14 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
     parseStatements(graph, childScope);
 
     expect(TokenKind.RBRACE);
+
+    // Collect new node IDs added during this subgraph
+    const newNodeIds: string[] = [];
+    for (const nodeId of graph.nodes.keys()) {
+      if (!nodesBefore.has(nodeId)) {
+        newNodeIds.push(nodeId);
+      }
+    }
 
     // Apply derived classes that were added during subgraph parsing to new nodes
     if (childScope.derivedClasses.length > parentScope.derivedClasses.length) {
@@ -224,6 +238,21 @@ export function parseTokens(tokens: ReadonlyArray<Token>): Graph {
         }
       }
     }
+
+    // Derive label from child scope's derived classes (set via label = "..." inside subgraph)
+    const derivedLabel = childScope.derivedClasses.length > parentScope.derivedClasses.length
+      ? childScope.derivedClasses[childScope.derivedClasses.length - 1] ?? ""
+      : "";
+
+    // Record the subgraph structure
+    const subgraphs = graph.subgraphs ?? [];
+    subgraphs.push({
+      id: subgraphName || `_anon_${subgraphs.length}`,
+      label: derivedLabel,
+      nodeIds: newNodeIds,
+      parentId: parentScope.subgraphId,
+    });
+    graph.subgraphs = subgraphs;
   }
 
   function parseNodeStatement(graph: Graph, scope: Scope, id: string): void {

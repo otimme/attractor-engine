@@ -6,3 +6,4 @@ export { QueueInterviewer } from "./queue.js";
 export { RecordingInterviewer } from "./recording.js";
 export type { Recording } from "./recording.js";
 export { WebInterviewer } from "./web.js";
+export type { InformListener } from "./web.js";

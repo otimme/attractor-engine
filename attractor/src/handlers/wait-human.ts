@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Handler } from "../types/handler.js";
 import type { Node, Graph } from "../types/graph.js";
 import type { Context } from "../types/context.js";
@@ -40,7 +42,7 @@ export class WaitForHumanHandler implements Handler {
     this.interviewer = interviewer;
   }
 
-  async execute(node: Node, _context: Context, graph: Graph, _logsRoot: string): Promise<Outcome> {
+  async execute(node: Node, _context: Context, graph: Graph, logsRoot: string): Promise<Outcome> {
     // 1. Derive choices from outgoing edges
     const edges = outgoingEdges(graph, node.id);
     const choices: Choice[] = edges.map((edge) => {
@@ -86,6 +88,7 @@ export class WaitForHumanHandler implements Handler {
             contextUpdates: {
               "human.gate.selected": found.key,
               "human.gate.label": found.label,
+              last_stage: node.id,
             },
           });
         }
@@ -113,14 +116,19 @@ export class WaitForHumanHandler implements Handler {
       });
     }
 
-    // 6. Return with suggested next
-    return createOutcome({
+    // 6. Write status.json and return with suggested next
+    const stageDir = join(logsRoot, node.id);
+    mkdirSync(stageDir, { recursive: true });
+    const outcome = createOutcome({
       status: StageStatus.SUCCESS,
       suggestedNextIds: [selected.to],
       contextUpdates: {
         "human.gate.selected": selected.key,
         "human.gate.label": selected.label,
+        last_stage: node.id,
       },
     });
+    await Bun.write(join(stageDir, "status.json"), JSON.stringify(outcome, null, 2));
+    return outcome;
   }
 }

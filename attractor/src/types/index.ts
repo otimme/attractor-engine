@@ -7,6 +7,7 @@ export type {
   AttributeValue,
   Node,
   Edge,
+  Subgraph,
   Graph,
 } from "./graph.js";
 export {
@@ -28,6 +29,7 @@ export { StageStatus } from "./outcome.js";
 export type { Outcome } from "./outcome.js";
 export { createOutcome } from "./outcome.js";
 
+export type { ContextValue } from "./context.js";
 export { Context } from "./context.js";
 
 export type { Checkpoint } from "./checkpoint.js";

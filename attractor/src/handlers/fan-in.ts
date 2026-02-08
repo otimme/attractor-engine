@@ -9,6 +9,7 @@ interface ParallelResult {
   nodeId: string;
   status: string;
   notes: string;
+  score?: number;
   contextUpdates: Record<string, string>;
 }
 
@@ -26,6 +27,10 @@ function heuristicSelect(candidates: readonly ParallelResult[]): ParallelResult 
     const rankA = OUTCOME_RANK[a.status] ?? 4;
     const rankB = OUTCOME_RANK[b.status] ?? 4;
     if (rankA !== rankB) return rankA - rankB;
+    // Higher score first (descending)
+    const scoreA = a.score ?? 0;
+    const scoreB = b.score ?? 0;
+    if (scoreA !== scoreB) return scoreB - scoreA;
     return a.nodeId.localeCompare(b.nodeId);
   });
 
@@ -72,7 +77,7 @@ export class FanInHandler implements Handler {
 
   async execute(node: Node, context: Context, _graph: Graph, _logsRoot: string): Promise<Outcome> {
     // 1. Read parallel results
-    const raw = context.get("parallel.results");
+    const raw = context.getString("parallel.results");
     if (raw === "") {
       return createOutcome({
         status: StageStatus.FAIL,

@@ -15,7 +15,7 @@ function makeEdge(from: string, to: string): Edge {
 }
 
 function makeGraph(edges: Edge[]): Graph {
-  return { name: "test", attributes: new Map(), nodes: new Map(), edges };
+  return { name: "test", attributes: new Map(), nodes: new Map(), edges, subgraphs: [] };
 }
 
 describe("ParallelHandler", () => {
@@ -61,7 +61,7 @@ describe("ParallelHandler", () => {
     const context = new Context();
 
     await handler.execute(node, context, makeGraph(edges), "/tmp");
-    const raw = context.get("parallel.results");
+    const raw = context.getString("parallel.results");
     expect(raw).not.toBe("");
     const results = JSON.parse(raw);
     expect(results.length).toBe(2);
@@ -312,7 +312,7 @@ describe("ParallelHandler advanced policies", () => {
     const context = new Context();
 
     await handler.execute(node, context, makeGraph(edges), "/tmp");
-    const raw = context.get("parallel.results");
+    const raw = context.getString("parallel.results");
     const results = JSON.parse(raw) as Array<{ nodeId: string; status: string; notes: string; contextUpdates: Record<string, string> }>;
     expect(results.length).toBe(2);
 

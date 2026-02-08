@@ -1,5 +1,7 @@
+export type ContextValue = string | number | boolean;
+
 export class Context {
-  private values: Map<string, string>;
+  private values: Map<string, ContextValue>;
   private logEntries: string[];
 
   constructor() {
@@ -7,12 +9,20 @@ export class Context {
     this.logEntries = [];
   }
 
-  set(key: string, value: string): void {
+  set(key: string, value: ContextValue): void {
     this.values.set(key, value);
   }
 
-  get(key: string, defaultValue: string = ""): string {
+  get(key: string, defaultValue: ContextValue = ""): ContextValue {
     return this.values.get(key) ?? defaultValue;
+  }
+
+  getString(key: string, defaultValue: string = ""): string {
+    const value = this.values.get(key);
+    if (value === undefined) {
+      return defaultValue;
+    }
+    return String(value);
   }
 
   has(key: string): boolean {
@@ -27,8 +37,8 @@ export class Context {
     return this.logEntries;
   }
 
-  snapshot(): Record<string, string> {
-    const result: Record<string, string> = {};
+  snapshot(): Record<string, ContextValue> {
+    const result: Record<string, ContextValue> = {};
     for (const [key, value] of this.values) {
       result[key] = value;
     }
@@ -44,7 +54,7 @@ export class Context {
     return ctx;
   }
 
-  applyUpdates(updates: Record<string, string>): void {
+  applyUpdates(updates: Record<string, ContextValue>): void {
     for (const [key, value] of Object.entries(updates)) {
       this.values.set(key, value);
     }

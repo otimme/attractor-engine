@@ -82,7 +82,7 @@ export class ParallelHandler implements Handler {
 
     const joinPolicy = parseJoinPolicy(getStringAttr(node.attributes, "join_policy", JoinPolicy.WAIT_ALL));
     const errorPolicy = parseErrorPolicy(getStringAttr(node.attributes, "error_policy", ErrorPolicy.CONTINUE));
-    const maxParallel = getIntegerAttr(node.attributes, "max_parallel", branches.length);
+    const maxParallel = getIntegerAttr(node.attributes, "max_parallel", 4);
     const joinK = getFloatFromAttrs(node.attributes, "join_k", 1);
     const requiredSuccesses = resolveJoinK(joinPolicy, joinK, branches.length);
 
@@ -353,12 +353,17 @@ export class ParallelHandler implements Handler {
   }
 
   private storeResults(results: BranchResult[], context: Context): void {
-    const serialized = results.map((r) => ({
-      nodeId: r.nodeId,
-      status: r.outcome.status,
-      notes: r.outcome.notes,
-      contextUpdates: r.outcome.contextUpdates,
-    }));
+    const serialized = results.map((r) => {
+      const scoreVal = r.outcome.contextUpdates["score"];
+      const score = typeof scoreVal === "number" ? scoreVal : 0;
+      return {
+        nodeId: r.nodeId,
+        status: r.outcome.status,
+        notes: r.outcome.notes,
+        score,
+        contextUpdates: r.outcome.contextUpdates,
+      };
+    });
     context.set("parallel.results", JSON.stringify(serialized));
   }
 }

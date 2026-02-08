@@ -35,6 +35,7 @@ function makeGraph(): Graph {
     attributes: new Map(),
     nodes: new Map(),
     edges: [],
+    subgraphs: [],
   };
 }
 

@@ -41,7 +41,7 @@ function resolveMode(
     return nodeVal;
   }
 
-  const graphVal = getStringAttr(graph.attributes, "fidelity");
+  const graphVal = getStringAttr(graph.attributes, "default_fidelity");
   if (graphVal !== "" && isValidFidelityMode(graphVal)) {
     return graphVal;
   }
@@ -51,7 +51,7 @@ function resolveMode(
 
 /**
  * Resolve thread ID for session reuse in full fidelity mode.
- * For full mode: edge attr thread_id > node attr thread_id > generated default.
+ * Precedence: node thread_id > edge thread_id > graph default_thread > node class > prevNodeId.
  * For non-full modes: returns empty string.
  */
 export function resolveThreadId(
@@ -65,6 +65,11 @@ export function resolveThreadId(
     return "";
   }
 
+  const nodeThreadId = getStringAttr(node.attributes, "thread_id");
+  if (nodeThreadId !== "") {
+    return nodeThreadId;
+  }
+
   if (edge) {
     const edgeThreadId = getStringAttr(edge.attributes, "thread_id");
     if (edgeThreadId !== "") {
@@ -72,12 +77,17 @@ export function resolveThreadId(
     }
   }
 
-  const nodeThreadId = getStringAttr(node.attributes, "thread_id");
-  if (nodeThreadId !== "") {
-    return nodeThreadId;
+  const graphDefault = getStringAttr(graph.attributes, "default_thread");
+  if (graphDefault !== "") {
+    return graphDefault;
   }
 
-  return `${prevNodeId}->${node.id}`;
+  const nodeClass = getStringAttr(node.attributes, "class");
+  if (nodeClass !== "") {
+    return nodeClass;
+  }
+
+  return prevNodeId;
 }
 
 /**
@@ -107,8 +117,8 @@ export function buildPreamble(
 }
 
 function buildTruncatePreamble(context: Context): string {
-  const goal = context.get("graph.goal", "");
-  const runId = context.get("run_id", "");
+  const goal = context.getString("graph.goal", "");
+  const runId = context.getString("run_id", "");
   return `Goal: ${goal}\nRun ID: ${runId}`;
 }
 
@@ -146,7 +156,7 @@ function buildSummaryLow(
   _graph: Graph,
 ): string {
   // ~600 token budget: brief event counts + goal
-  const goal = context.get("graph.goal", "");
+  const goal = context.getString("graph.goal", "");
   const total = completedNodes.length;
   let successCount = 0;
   let failCount = 0;
@@ -170,7 +180,7 @@ function buildSummaryMedium(
 ): string {
   // ~1500 token budget: recent outcomes + active context vars
   const lines: string[] = [];
-  const goal = context.get("graph.goal", "");
+  const goal = context.getString("graph.goal", "");
   lines.push(`Goal: ${goal}`);
   lines.push("");
   lines.push("# Recent Outcomes");
@@ -207,7 +217,7 @@ function buildSummaryHigh(
 ): string {
   // ~3000 token budget: detailed events + all context + notes from outcomes
   const lines: string[] = [];
-  const goal = context.get("graph.goal", "");
+  const goal = context.getString("graph.goal", "");
   lines.push(`Goal: ${goal}`);
   lines.push("");
   lines.push("# All Completed Stages");

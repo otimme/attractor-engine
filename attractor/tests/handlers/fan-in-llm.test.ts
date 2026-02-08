@@ -11,7 +11,7 @@ function makeNode(id: string, attrs: Record<string, AttributeValue> = {}): Node 
 }
 
 function makeGraph(): Graph {
-  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [] };
+  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] };
 }
 
 function makeResults(entries: Array<{ nodeId: string; status: string; notes?: string }>): string {

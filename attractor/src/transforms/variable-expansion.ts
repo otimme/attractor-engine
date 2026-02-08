@@ -24,6 +24,7 @@ export class VariableExpansionTransform implements Transform {
       attributes: graph.attributes,
       nodes: newNodes,
       edges: graph.edges,
+      subgraphs: graph.subgraphs,
     };
   }
 }

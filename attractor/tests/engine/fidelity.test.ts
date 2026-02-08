@@ -53,7 +53,7 @@ describe("resolveFidelity", () => {
   test("node attr takes precedence over graph", () => {
     const node = makeNode("A", { fidelity: stringAttr("truncate") });
     const graph = makeGraph([node], [], {
-      fidelity: stringAttr("summary:low"),
+      default_fidelity: stringAttr("summary:low"),
     });
 
     const result = resolveFidelity(node, undefined, graph);
@@ -70,24 +70,58 @@ describe("resolveFidelity", () => {
 });
 
 describe("resolveThreadId", () => {
-  test("uses edge attr if present in full mode", () => {
-    const node = makeNode("A", { fidelity: stringAttr("full") });
-    const edge = makeEdge("X", "A", {
+  test("node thread_id takes precedence over edge", () => {
+    const node = makeNode("A", {
       fidelity: stringAttr("full"),
-      thread_id: stringAttr("my-thread"),
+      thread_id: stringAttr("node-thread"),
+    });
+    const edge = makeEdge("X", "A", {
+      thread_id: stringAttr("edge-thread"),
     });
     const graph = makeGraph([node], [edge]);
 
     const result = resolveThreadId(node, edge, graph, "X");
-    expect(result).toBe("my-thread");
+    expect(result).toBe("node-thread");
   });
 
-  test("generates default thread id for full mode", () => {
+  test("uses edge thread_id when node has none", () => {
+    const node = makeNode("A", { fidelity: stringAttr("full") });
+    const edge = makeEdge("X", "A", {
+      thread_id: stringAttr("edge-thread"),
+    });
+    const graph = makeGraph([node], [edge]);
+
+    const result = resolveThreadId(node, edge, graph, "X");
+    expect(result).toBe("edge-thread");
+  });
+
+  test("uses graph default_thread when no node or edge thread_id", () => {
+    const node = makeNode("A", { fidelity: stringAttr("full") });
+    const graph = makeGraph([node], [], {
+      default_thread: stringAttr("graph-thread"),
+    });
+
+    const result = resolveThreadId(node, undefined, graph, "X");
+    expect(result).toBe("graph-thread");
+  });
+
+  test("uses node class as thread id when no explicit thread_id", () => {
+    const node = makeNode("A", {
+      fidelity: stringAttr("full"),
+      class: stringAttr("loop-a"),
+    });
+    const graph = makeGraph([node], []);
+
+    const result = resolveThreadId(node, undefined, graph, "X");
+    expect(result).toBe("loop-a");
+  });
+
+  test("falls back to previous node ID", () => {
     const node = makeNode("B", { fidelity: stringAttr("full") });
     const graph = makeGraph([node], []);
 
     const result = resolveThreadId(node, undefined, graph, "A");
-    expect(result).toBe("A->B");
+    expect(result).toBe("A");
   });
 
   test("returns empty string for non-full modes", () => {

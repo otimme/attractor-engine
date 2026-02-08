@@ -8,7 +8,7 @@ import { createOutcome, StageStatus } from "../../src/types/outcome.js";
 import type { Checkpoint } from "../../src/types/checkpoint.js";
 import type { Handler } from "../../src/types/handler.js";
 import type { Graph, Node, Edge, AttributeValue } from "../../src/types/graph.js";
-import { stringAttr, booleanAttr } from "../../src/types/graph.js";
+import { stringAttr, booleanAttr, integerAttr } from "../../src/types/graph.js";
 import { join } from "path";
 import { mkdtemp, rm, readFile } from "fs/promises";
 import { tmpdir } from "os";
@@ -99,6 +99,7 @@ describe("PipelineRunner.resume", () => {
       currentNode: "A",
       completedNodes: ["start", "A"],
       nodeRetries: { start: 1, A: 1 },
+      nodeOutcomes: { start: "success", A: "success" },
       contextValues: {
         "graph.goal": "resume test",
         outcome: "success",
@@ -140,7 +141,7 @@ describe("PipelineRunner.resume", () => {
     let capturedFidelity = "";
     const capturingHandler: Handler = {
       execute: async (_node, ctx) => {
-        capturedFidelity = ctx.get("_fidelity.mode", "");
+        capturedFidelity = ctx.getString("_fidelity.mode", "");
         return createOutcome({ status: StageStatus.SUCCESS });
       },
     };
@@ -164,6 +165,7 @@ describe("PipelineRunner.resume", () => {
       currentNode: "A",
       completedNodes: ["start", "A"],
       nodeRetries: {},
+      nodeOutcomes: { start: "success", A: "success" },
       contextValues: { outcome: "success" },
       logs: [],
     };
@@ -221,10 +223,12 @@ describe("mid-pipeline failure routing to retry_target", () => {
           shape: stringAttr("box"),
           retry_target: stringAttr("implement"),
         }),
+        makeNode("exit", { shape: stringAttr("Msquare") }),
       ],
       [
         makeEdge("start", "implement"),
-        makeEdge("implement", "validate"),
+        makeEdge("implement", "validate", { weight: integerAttr(10) }),
+        makeEdge("implement", "exit"),
         // No outgoing edges from validate
       ],
     );
@@ -255,9 +259,11 @@ describe("mid-pipeline failure routing to retry_target", () => {
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
         makeNode("failing", { shape: stringAttr("box") }),
+        makeNode("exit", { shape: stringAttr("Msquare") }),
       ],
       [
-        makeEdge("start", "failing"),
+        makeEdge("start", "failing", { weight: integerAttr(10) }),
+        makeEdge("start", "exit"),
       ],
     );
 

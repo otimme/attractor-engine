@@ -34,7 +34,7 @@ describe("HandlerRegistry", () => {
 
     const node = makeNode("gate", { type: "wait.human" });
     const resolved = registry.resolve(node);
-    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [] }, "/tmp");
+    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] }, "/tmp");
     expect(outcome.notes).toBe("wait.human");
   });
 
@@ -46,7 +46,7 @@ describe("HandlerRegistry", () => {
 
     const node = makeNode("begin", { shape: "Mdiamond" });
     const resolved = registry.resolve(node);
-    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [] }, "/tmp");
+    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] }, "/tmp");
     expect(outcome.notes).toBe("start");
   });
 
@@ -56,7 +56,7 @@ describe("HandlerRegistry", () => {
 
     const node = makeNode("some_node");
     const resolved = registry.resolve(node);
-    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [] }, "/tmp");
+    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] }, "/tmp");
     expect(outcome.notes).toBe("default");
   });
 
@@ -84,7 +84,7 @@ describe("HandlerRegistry", () => {
     for (const [shape, expectedType] of mappings) {
       const node = makeNode("n", { shape });
       const resolved = registry.resolve(node);
-      const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [] }, "/tmp");
+      const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] }, "/tmp");
       expect(outcome.notes).toBe(expectedType);
     }
   });
@@ -100,7 +100,7 @@ describe("HandlerRegistry", () => {
     // Node has box shape (maps to codergen) but explicit type=custom
     const node = makeNode("n", { shape: "box", type: "custom" });
     const resolved = registry.resolve(node);
-    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [] }, "/tmp");
+    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] }, "/tmp");
     expect(outcome.notes).toBe("custom");
   });
 
@@ -112,7 +112,7 @@ describe("HandlerRegistry", () => {
 
     const node = makeNode("n", { type: "start" });
     const resolved = registry.resolve(node);
-    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [] }, "/tmp");
+    const outcome = await resolved.execute(node, new Context(), { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] }, "/tmp");
     expect(outcome.notes).toBe("new");
   });
 });

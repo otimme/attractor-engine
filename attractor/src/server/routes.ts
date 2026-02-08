@@ -180,17 +180,18 @@ function handleGetQuestions(
     return errorResponse("Pipeline not found", 404);
   }
 
-  const question = record.interviewer.getPendingQuestion();
-  if (!question) {
+  const pending = record.interviewer.getPendingQuestion();
+  if (!pending) {
     return jsonResponse({ question: null });
   }
 
-  return jsonResponse({ question });
+  return jsonResponse({ id: pending.id, question: pending.question });
 }
 
-/** POST /pipelines/:id/questions — answer pending question */
+/** POST /pipelines/:id/questions/:qid/answer — answer pending question */
 async function handlePostAnswer(
   pipelineId: string,
+  qid: string,
   request: Request,
   ctx: RouteContext,
 ): Promise<Response> {
@@ -221,22 +222,40 @@ async function handlePostAnswer(
     text: typeof textField === "string" ? textField : "",
   });
 
-  const submitted = record.interviewer.submitAnswer(answer);
+  const submitted = record.interviewer.submitAnswer(answer, qid);
   if (!submitted) {
-    return errorResponse("No pending question", 409);
+    return errorResponse("No pending question or question ID mismatch", 409);
   }
 
   return jsonResponse({ submitted: true });
 }
 
-/** GET /pipelines/:id/graph — get graph DOT source */
-function handleGetGraph(
+/** GET /pipelines/:id/graph — get rendered graph visualization (SVG) */
+async function handleGetGraph(
   pipelineId: string,
   ctx: RouteContext,
-): Response {
+): Promise<Response> {
   const record = ctx.pipelines.get(pipelineId);
   if (!record) {
     return errorResponse("Pipeline not found", 404);
+  }
+
+  try {
+    const proc = Bun.spawn(["dot", "-Tsvg"], {
+      stdin: new Blob([record.dotSource]),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const svg = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode === 0 && svg.length > 0) {
+      return new Response(svg, {
+        status: 200,
+        headers: { "Content-Type": "image/svg+xml" },
+      });
+    }
+  } catch {
+    // Graphviz not available — fall back to DOT source
   }
 
   return new Response(record.dotSource, {
@@ -309,7 +328,7 @@ export async function handleRequest(
 
   // GET /pipelines/:id/graph
   if (method === "GET" && url.pathname === `/pipelines/${pipelineId}/graph`) {
-    return handleGetGraph(pipelineId, ctx);
+    return await handleGetGraph(pipelineId, ctx);
   }
 
   // GET /pipelines/:id/events
@@ -327,9 +346,16 @@ export async function handleRequest(
     return handleGetQuestions(pipelineId, ctx);
   }
 
-  // POST /pipelines/:id/questions
-  if (method === "POST" && url.pathname === `/pipelines/${pipelineId}/questions`) {
-    return handlePostAnswer(pipelineId, request, ctx);
+  // POST /pipelines/:id/questions/:qid/answer
+  const answerMatch = url.pathname.match(
+    new RegExp(`^/pipelines/${pipelineId}/questions/([^/]+)/answer$`),
+  );
+  if (method === "POST" && answerMatch) {
+    const qid = answerMatch[1];
+    if (qid === undefined) {
+      return errorResponse("Missing question ID", 400);
+    }
+    return handlePostAnswer(pipelineId, qid, request, ctx);
   }
 
   // GET /pipelines/:id/context

@@ -22,14 +22,14 @@ export function resolveKey(
     return outcome.preferredLabel;
   }
   if (key.startsWith("context.")) {
-    const fullValue = context.get(key);
+    const fullValue = context.getString(key);
     if (fullValue !== "") {
       return fullValue;
     }
     const stripped = key.slice("context.".length);
-    return context.get(stripped);
+    return context.getString(stripped);
   }
-  return context.get(key);
+  return context.getString(key);
 }
 
 /**

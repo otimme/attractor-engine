@@ -23,7 +23,7 @@ function makeGraph(goal: string = ""): Graph {
   if (goal) {
     attributes.set("goal", stringAttr(goal));
   }
-  return { name: "test", attributes, nodes: new Map(), edges: [] };
+  return { name: "test", attributes, nodes: new Map(), edges: [], subgraphs: [] };
 }
 
 beforeEach(() => {
@@ -188,7 +188,7 @@ describe("CodergenHandler", () => {
         makeGraph(),
         TEST_DIR,
       );
-      const lastResponse = outcome.contextUpdates.last_response ?? "";
+      const lastResponse = String(outcome.contextUpdates.last_response ?? "");
       expect(lastResponse.length).toBe(200);
     });
   });

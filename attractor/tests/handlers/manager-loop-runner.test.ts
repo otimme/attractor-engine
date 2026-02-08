@@ -12,7 +12,7 @@ import { ManagerLoopHandler } from "../../src/handlers/manager-loop.js";
 import type { PipelineRunnerFactory } from "../../src/handlers/manager-loop.js";
 import { StageStatus, createOutcome } from "../../src/types/outcome.js";
 import { Context } from "../../src/types/context.js";
-import { stringAttr, integerAttr } from "../../src/types/graph.js";
+import { stringAttr, integerAttr, durationAttr } from "../../src/types/graph.js";
 import type { Node, Graph, AttributeValue } from "../../src/types/graph.js";
 import type { Handler } from "../../src/types/handler.js";
 import { PipelineRunner, createHandlerRegistry } from "../../src/engine/runner.js";
@@ -27,12 +27,13 @@ function makeNode(
   return { id, attributes: new Map(Object.entries(attrs)) };
 }
 
-function makeGraph(): Graph {
+function makeGraph(attrs: Record<string, AttributeValue> = {}): Graph {
   return {
     name: "parent",
-    attributes: new Map(),
+    attributes: new Map(Object.entries(attrs)),
     nodes: new Map(),
     edges: [],
+    subgraphs: [],
   };
 }
 
@@ -77,15 +78,17 @@ describe("ManagerLoopHandler with runnerFactory", () => {
 
     const handler = new ManagerLoopHandler({ runnerFactory });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr(dotFilePath),
       "manager.max_cycles": integerAttr(5),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr(dotFilePath),
     });
 
     const outcome = await handler.execute(
       node,
       new Context(),
-      makeGraph(),
+      graph,
       tmpDir,
     );
 
@@ -110,12 +113,14 @@ describe("ManagerLoopHandler with runnerFactory", () => {
 
     const handler = new ManagerLoopHandler({ runnerFactory });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr(dotFilePath),
       "manager.max_cycles": integerAttr(5),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr(dotFilePath),
     });
 
-    await handler.execute(node, new Context(), makeGraph(), tmpDir);
+    await handler.execute(node, new Context(), graph, tmpDir);
 
     const checkpointPath = join(tmpDir, "child", "checkpoint.json");
     expect(existsSync(checkpointPath)).toBe(true);
@@ -142,15 +147,17 @@ describe("ManagerLoopHandler with runnerFactory", () => {
 
     const handler = new ManagerLoopHandler({ runnerFactory });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr(dotFilePath),
       "manager.max_cycles": integerAttr(5),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr(dotFilePath),
     });
 
     const outcome = await handler.execute(
       node,
       new Context(),
-      makeGraph(),
+      graph,
       tmpDir,
     );
 
@@ -163,7 +170,7 @@ describe("ManagerLoopHandler with runnerFactory", () => {
     const runnerFactoryCalled = { value: false };
 
     const handler = new ManagerLoopHandler({
-      spawner: (dotFile, logsRoot) => {
+      spawner: (_dotFile, logsRoot) => {
         spawnerCalled = true;
         const childLogsRoot = join(logsRoot, "child");
         mkdirSync(childLogsRoot, { recursive: true });
@@ -181,12 +188,14 @@ describe("ManagerLoopHandler with runnerFactory", () => {
     });
 
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr(dotFilePath),
       "manager.max_cycles": integerAttr(2),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr(dotFilePath),
     });
 
-    await handler.execute(node, new Context(), makeGraph(), tmpDir);
+    await handler.execute(node, new Context(), graph, tmpDir);
 
     expect(spawnerCalled).toBe(true);
     expect(runnerFactoryCalled.value).toBe(false);

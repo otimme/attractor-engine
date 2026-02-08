@@ -16,7 +16,12 @@ import type {
 } from "../../src/handlers/manager-loop.js";
 import { StageStatus } from "../../src/types/outcome.js";
 import { Context } from "../../src/types/context.js";
-import { stringAttr, integerAttr } from "../../src/types/graph.js";
+import {
+  stringAttr,
+  integerAttr,
+  durationAttr,
+  booleanAttr,
+} from "../../src/types/graph.js";
 import type { Node, Graph, AttributeValue } from "../../src/types/graph.js";
 import type { Checkpoint } from "../../src/types/checkpoint.js";
 
@@ -29,12 +34,13 @@ function makeNode(
   return { id, attributes: new Map(Object.entries(attrs)) };
 }
 
-function makeGraph(): Graph {
+function makeGraph(attrs: Record<string, AttributeValue> = {}): Graph {
   return {
     name: "parent",
-    attributes: new Map(),
+    attributes: new Map(Object.entries(attrs)),
     nodes: new Map(),
     edges: [],
+    subgraphs: [],
   };
 }
 
@@ -53,6 +59,7 @@ function makeCheckpoint(overrides: Partial<Checkpoint> = {}): Checkpoint {
     currentNode: "work",
     completedNodes: ["start", "work"],
     nodeRetries: {},
+    nodeOutcomes: {},
     contextValues: { outcome: "success" },
     logs: [],
     ...overrides,
@@ -60,11 +67,11 @@ function makeCheckpoint(overrides: Partial<Checkpoint> = {}): Checkpoint {
 }
 
 /**
- * Creates a mock spawner that resolves its waitForCompletion after the
+ * Creates a stub spawner that resolves its waitForCompletion after the
  * specified number of poll cycles (observe calls). The checkpoint is
  * written to childLogsRoot before returning.
  */
-function createMockSpawner(opts: {
+function createStubSpawner(opts: {
   exitCode?: number;
   checkpoint?: Checkpoint;
   resolveImmediately?: boolean;
@@ -118,7 +125,7 @@ afterEach(() => {
 describe("ManagerLoopHandler", () => {
   it("auto-starts child subprocess", async () => {
     const checkpoint = makeCheckpoint();
-    const { spawner, calls } = createMockSpawner({
+    const { spawner, calls } = createStubSpawner({
       exitCode: 0,
       checkpoint,
       resolveImmediately: true,
@@ -126,17 +133,42 @@ describe("ManagerLoopHandler", () => {
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(2),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
     });
 
-    await handler.execute(node, new Context(), makeGraph(), tmpDir);
+    await handler.execute(node, new Context(), graph, tmpDir);
 
     expect(calls.length).toBe(1);
     const firstCall = calls.at(0);
     expect(firstCall).toBeDefined();
     expect(firstCall?.dotFile).toBe("/path/to/child.dot");
+  });
+
+  it("does not start child when autostart is false", async () => {
+    const { spawner, calls } = createStubSpawner({
+      exitCode: 0,
+      resolveImmediately: true,
+    });
+
+    const handler = new ManagerLoopHandler({ spawner });
+    const node = makeNode("mgr", {
+      "stack.child_autostart": booleanAttr(false),
+      "manager.max_cycles": integerAttr(2),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
+    });
+
+    const outcome = await handler.execute(node, new Context(), graph, tmpDir);
+
+    expect(calls.length).toBe(0);
+    expect(outcome.status).toBe(StageStatus.FAIL);
+    expect(outcome.failureReason).toContain("autostart disabled");
   });
 
   it("observes child checkpoint data into context", async () => {
@@ -145,7 +177,7 @@ describe("ManagerLoopHandler", () => {
       completedNodes: ["start", "step1", "step2"],
       contextValues: { outcome: "success", "custom.key": "custom-value" },
     });
-    const { spawner } = createMockSpawner({
+    const { spawner } = createStubSpawner({
       exitCode: 0,
       checkpoint,
       resolveImmediately: true,
@@ -153,22 +185,24 @@ describe("ManagerLoopHandler", () => {
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(2),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
     });
     const ctx = new Context();
 
-    await handler.execute(node, ctx, makeGraph(), tmpDir);
+    await handler.execute(node, ctx, graph, tmpDir);
 
     expect(ctx.get("stack.child.currentNode")).toBe("step2");
     expect(ctx.get("stack.child.completedNodes")).toBe("start,step1,step2");
     expect(ctx.get("stack.child.context.custom.key")).toBe("custom-value");
   });
 
-  it("returns SUCCESS when child completes successfully", async () => {
+  it("sets stack.child.status and stack.child.outcome on success", async () => {
     const checkpoint = makeCheckpoint({ contextValues: { outcome: "success" } });
-    const { spawner } = createMockSpawner({
+    const { spawner } = createStubSpawner({
       exitCode: 0,
       checkpoint,
       resolveImmediately: true,
@@ -176,64 +210,66 @@ describe("ManagerLoopHandler", () => {
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(3),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
     });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
+    });
+    const ctx = new Context();
 
-    const outcome = await handler.execute(
-      node,
-      new Context(),
-      makeGraph(),
-      tmpDir,
-    );
+    const outcome = await handler.execute(node, ctx, graph, tmpDir);
 
     expect(outcome.status).toBe(StageStatus.SUCCESS);
-    expect(outcome.notes).toContain("child completed successfully");
+    expect(ctx.getString("stack.child.status")).toBe("completed");
+    expect(ctx.getString("stack.child.outcome")).toBe("success");
   });
 
   it("returns FAIL when child fails", async () => {
     const checkpoint = makeCheckpoint({
       contextValues: { outcome: "fail" },
     });
-    const { spawner } = createMockSpawner({
+    const { spawner } = createStubSpawner({
       checkpoint,
     });
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(2),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+      "manager.actions": stringAttr("observe"),
     });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
+    });
+    const ctx = new Context();
 
-    const outcome = await handler.execute(
-      node,
-      new Context(),
-      makeGraph(),
-      tmpDir,
-    );
+    const outcome = await handler.execute(node, ctx, graph, tmpDir);
 
     expect(outcome.status).toBe(StageStatus.FAIL);
     expect(outcome.failureReason).toContain("child pipeline failed");
+    expect(ctx.getString("stack.child.status")).toBe("failed");
+    expect(ctx.getString("stack.child.outcome")).toBe("fail");
   });
 
   it("returns FAIL when max_cycles exceeded", async () => {
     // No checkpoint, child never completes
-    const { spawner, killed } = createMockSpawner({});
+    const { spawner, killed } = createStubSpawner({});
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(3),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
       "manager.actions": stringAttr("observe"),
+    });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
     });
 
     const outcome = await handler.execute(
       node,
       new Context(),
-      makeGraph(),
+      graph,
       tmpDir,
     );
 
@@ -243,29 +279,32 @@ describe("ManagerLoopHandler", () => {
   });
 
   it("evaluates stop condition and triggers early exit", async () => {
-    // Checkpoint sets a context value that the stop condition checks
+    // Checkpoint has in-progress outcome (not success/fail) but a custom
+    // quality score that the stop condition checks
     const checkpoint = makeCheckpoint({
-      contextValues: { outcome: "success", "quality.score": "95" },
+      contextValues: { outcome: "in_progress", "quality.score": "95" },
     });
-    const { spawner, killed } = createMockSpawner({
+    const { spawner, killed } = createStubSpawner({
       checkpoint,
     });
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(10),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
       "manager.stop_condition": stringAttr(
         "stack.child.context.quality.score=95",
       ),
       "manager.actions": stringAttr("observe"),
     });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
+    });
 
     const outcome = await handler.execute(
       node,
       new Context(),
-      makeGraph(),
+      graph,
       tmpDir,
     );
 
@@ -278,19 +317,22 @@ describe("ManagerLoopHandler", () => {
     const checkpoint = makeCheckpoint({
       contextValues: { outcome: "fail" },
     });
-    const { spawner } = createMockSpawner({
+    const { spawner } = createStubSpawner({
       checkpoint,
     });
 
     const handler = new ManagerLoopHandler({ spawner });
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
       "manager.max_cycles": integerAttr(2),
-      "manager.poll_interval": integerAttr(0),
+      "manager.poll_interval": durationAttr(0, "0ms"),
+      "manager.steer_cooldown": durationAttr(0, "0ms"),
       "manager.actions": stringAttr("observe,steer"),
     });
+    const graph = makeGraph({
+      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
+    });
 
-    await handler.execute(node, new Context(), makeGraph(), tmpDir);
+    await handler.execute(node, new Context(), graph, tmpDir);
 
     const interventionPath = join(tmpDir, "child", "intervention.json");
     expect(existsSync(interventionPath)).toBe(true);
@@ -300,30 +342,51 @@ describe("ManagerLoopHandler", () => {
     expect(intervention.cycle).toBe(1);
   });
 
-  it("uses default poll_interval when not specified", async () => {
+  it("reads stack.child_dotfile from graph attributes", async () => {
     const checkpoint = makeCheckpoint({ contextValues: { outcome: "fail" } });
-    const { spawner } = createMockSpawner({
+    const { spawner } = createStubSpawner({
       checkpoint,
     });
 
     const handler = new ManagerLoopHandler({ spawner });
-    // No manager.poll_interval attribute set
+    // dotfile on node should be ignored; graph attribute is used
     const node = makeNode("mgr", {
-      "stack.child_dotfile": stringAttr("/path/to/child.dot"),
+      "stack.child_dotfile": stringAttr("/wrong/path.dot"),
       "manager.max_cycles": integerAttr(1),
+      "manager.poll_interval": durationAttr(0, "0ms"),
       "manager.actions": stringAttr("observe"),
     });
+    // No dotfile in graph attributes => should fail
+    const graph = makeGraph();
 
-    // This should still work -- using the default 45s poll interval
-    // Since max_cycles is 1, it will either return from checkpoint check or max_cycles
     const outcome = await handler.execute(
       node,
       new Context(),
-      makeGraph(),
+      graph,
       tmpDir,
     );
 
-    // With max_cycles=1 and the fail checkpoint, we get FAIL from checkpoint detection
     expect(outcome.status).toBe(StageStatus.FAIL);
+    expect(outcome.failureReason).toContain("missing stack.child_dotfile");
+  });
+
+  it("fails when stack.child_dotfile is missing from graph", async () => {
+    const { spawner } = createStubSpawner({});
+
+    const handler = new ManagerLoopHandler({ spawner });
+    const node = makeNode("mgr", {
+      "manager.max_cycles": integerAttr(1),
+    });
+    const graph = makeGraph();
+
+    const outcome = await handler.execute(
+      node,
+      new Context(),
+      graph,
+      tmpDir,
+    );
+
+    expect(outcome.status).toBe(StageStatus.FAIL);
+    expect(outcome.failureReason).toContain("missing stack.child_dotfile");
   });
 });

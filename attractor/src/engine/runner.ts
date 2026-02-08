@@ -10,7 +10,7 @@ import type { LintRule } from "../types/diagnostic.js";
 import { Context } from "../types/context.js";
 import { StageStatus, createOutcome } from "../types/outcome.js";
 import { PipelineEventKind as EventKind } from "../types/events.js";
-import { getStringAttr, getBooleanAttr } from "../types/graph.js";
+import { getStringAttr, getBooleanAttr, attrToString } from "../types/graph.js";
 import { selectEdge } from "./edge-selection.js";
 import { buildRetryPolicy, executeWithRetry } from "./retry.js";
 import { checkGoalGates, getRetryTarget } from "./goal-gates.js";
@@ -18,8 +18,11 @@ import { saveCheckpoint, loadCheckpoint } from "./checkpoint.js";
 import { resolveFidelity } from "./fidelity.js";
 import { validateOrRaise } from "../validation/validate.js";
 import { incomingEdges } from "../types/graph.js";
+import { builtInTransforms } from "../transforms/index.js";
+import { executePreHook, executePostHook } from "./tool-hooks.js";
 import { FidelityMode as FM } from "../types/fidelity.js";
 import { join } from "path";
+import { mkdir, writeFile } from "fs/promises";
 import { randomUUID } from "crypto";
 
 /** Shape-to-handler-type mapping from spec 2.8 */
@@ -91,6 +94,7 @@ export interface PipelineRunnerConfig {
   transforms?: Transform[];
   extraLintRules?: LintRule[];
   eventEmitter?: EventEmitter;
+  onEvent?: (event: PipelineEvent) => void;
   logsRoot?: string;
 }
 
@@ -121,13 +125,8 @@ function findStartNode(graph: Graph): Node {
 }
 
 function mirrorGraphAttributes(graph: Graph, context: Context): void {
-  const goal = getStringAttr(graph.attributes, "goal");
-  if (goal !== "") {
-    context.set("graph.goal", goal);
-  }
-  const label = getStringAttr(graph.attributes, "label");
-  if (label !== "") {
-    context.set("graph.label", label);
+  for (const [key, attr] of graph.attributes) {
+    context.set(`graph.${key}`, attrToString(attr));
   }
 }
 
@@ -145,20 +144,28 @@ interface LoopState {
 export class PipelineRunner {
   private config: PipelineRunnerConfig;
   private pipelineId: string;
+  private additionalTransforms: Transform[] = [];
 
   constructor(config: PipelineRunnerConfig) {
     this.config = config;
     this.pipelineId = randomUUID();
   }
 
+  registerTransform(transform: Transform): void {
+    this.additionalTransforms.push(transform);
+  }
+
   async run(input: Graph): Promise<PipelineResult> {
     let graph = input;
 
-    // Apply transforms
-    if (this.config.transforms) {
-      for (const transform of this.config.transforms) {
-        graph = transform.apply(graph);
-      }
+    // Apply built-in transforms first, then config transforms, then registered transforms
+    const allTransforms = [
+      ...builtInTransforms(),
+      ...(this.config.transforms ?? []),
+      ...this.additionalTransforms,
+    ];
+    for (const transform of allTransforms) {
+      graph = transform.apply(graph);
     }
 
     // Validate graph (rejects error-severity diagnostics)
@@ -180,6 +187,32 @@ export class PipelineRunner {
     };
 
     this.emitEvent(EventKind.PIPELINE_STARTED, { graphName: graph.name });
+
+    // Create run directory and manifest
+    const logsRoot = this.config.logsRoot ?? "/tmp/attractor-logs";
+    try {
+      await mkdir(logsRoot, { recursive: true });
+      const manifest = {
+        graphName: graph.name,
+        goal: getStringAttr(graph.attributes, "goal"),
+        startedAt: new Date().toISOString(),
+        pipelineId: this.pipelineId,
+      };
+      await writeFile(join(logsRoot, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
+    } catch {
+      // Run directory creation is non-fatal
+    }
+
+    // Save initial checkpoint
+    await this.saveCheckpointSafe(logsRoot, {
+      timestamp: new Date().toISOString(),
+      currentNode: state.currentNode.id,
+      completedNodes: [],
+      nodeRetries: {},
+      nodeOutcomes: {},
+      contextValues: context.snapshot(),
+      logs: [],
+    });
 
     return this.executeLoop(graph, state);
   }
@@ -206,10 +239,10 @@ export class PipelineRunner {
       throw new Error(`Checkpoint currentNode not found in graph: ${checkpoint.currentNode}`);
     }
 
-    const outcomeStatus = context.get("outcome", StageStatus.SUCCESS);
+    const outcomeStatus = context.getString("outcome", StageStatus.SUCCESS);
     const lastOutcome = createOutcome({
       status: outcomeStatus as StageStatus,
-      preferredLabel: context.get("preferred_label"),
+      preferredLabel: context.getString("preferred_label"),
     });
 
     const nextEdge = selectEdge(checkpointNode, lastOutcome, context, graph);
@@ -222,10 +255,18 @@ export class PipelineRunner {
       throw new Error(`Edge target node not found: ${nextEdge.to}`);
     }
 
+    // Restore nodeOutcomes from checkpoint
+    const nodeOutcomes = new Map<string, Outcome>();
+    if (checkpoint.nodeOutcomes) {
+      for (const [nodeId, status] of Object.entries(checkpoint.nodeOutcomes)) {
+        nodeOutcomes.set(nodeId, createOutcome({ status: status as StageStatus }));
+      }
+    }
+
     const state: LoopState = {
       context,
       completedNodes,
-      nodeOutcomes: new Map(),
+      nodeOutcomes,
       nodeRetries,
       currentNode: nextNode,
       lastOutcome,
@@ -295,6 +336,30 @@ export class PipelineRunner {
         return { outcome: failOutcome, completedNodes, context };
       }
 
+      // Tool hooks: pre-hook
+      const preHookCmd = getStringAttr(currentNode.attributes, "tool_hooks.pre")
+        || getStringAttr(graph.attributes, "tool_hooks.pre");
+      if (preHookCmd !== "") {
+        this.emitEvent(EventKind.TOOL_HOOK_PRE, { nodeId: currentNode.id, command: preHookCmd });
+        const hookResult = await executePreHook(preHookCmd, "handler", {}, logsRoot, currentNode.id);
+        if (!hookResult.proceed) {
+          const skipOutcome = createOutcome({
+            status: StageStatus.SKIPPED,
+            notes: "pre-hook returned non-zero, skipping stage",
+          });
+          completedNodes.push(currentNode.id);
+          nodeOutcomes.set(currentNode.id, skipOutcome);
+          lastOutcome = skipOutcome;
+          this.emitEvent(EventKind.STAGE_COMPLETED, { nodeId: currentNode.id, status: skipOutcome.status });
+          const skipEdge = selectEdge(currentNode, skipOutcome, context, graph);
+          if (!skipEdge) break;
+          const skipTarget = graph.nodes.get(skipEdge.to);
+          if (!skipTarget) break;
+          currentNode = skipTarget;
+          continue;
+        }
+      }
+
       const retryPolicy = buildRetryPolicy(currentNode, graph);
       const retryResult = await executeWithRetry(
         currentNode,
@@ -303,8 +368,26 @@ export class PipelineRunner {
         logsRoot,
         handler,
         retryPolicy,
+        {
+          onRetry: (nodeId, attempt, maxAttempts, reason) => {
+            this.emitEvent(EventKind.STAGE_RETRYING, {
+              nodeId,
+              attempt,
+              maxAttempts,
+              reason,
+            });
+          },
+        },
       );
       const outcome = retryResult.outcome;
+
+      // Tool hooks: post-hook
+      const postHookCmd = getStringAttr(currentNode.attributes, "tool_hooks.post")
+        || getStringAttr(graph.attributes, "tool_hooks.post");
+      if (postHookCmd !== "") {
+        this.emitEvent(EventKind.TOOL_HOOK_POST, { nodeId: currentNode.id, command: postHookCmd });
+        await executePostHook(postHookCmd, "handler", {}, outcome.status, logsRoot, currentNode.id);
+      }
 
       // Step 3: Record completion
       completedNodes.push(currentNode.id);
@@ -329,22 +412,19 @@ export class PipelineRunner {
       for (const [nodeId, count] of nodeRetries) {
         retriesRecord[nodeId] = count;
       }
-      const checkpoint: Checkpoint = {
+      const outcomesRecord: Record<string, string> = {};
+      for (const [nodeId, o] of nodeOutcomes) {
+        outcomesRecord[nodeId] = o.status;
+      }
+      await this.saveCheckpointSafe(logsRoot, {
         timestamp: new Date().toISOString(),
         currentNode: currentNode.id,
         completedNodes: [...completedNodes],
         nodeRetries: retriesRecord,
+        nodeOutcomes: outcomesRecord,
         contextValues: context.snapshot(),
         logs: [...context.logs()],
-      };
-      try {
-        await saveCheckpoint(checkpoint, join(logsRoot, "checkpoint.json"));
-        this.emitEvent(EventKind.CHECKPOINT_SAVED, {
-          nodeId: currentNode.id,
-        });
-      } catch {
-        // Checkpoint save failure is non-fatal
-      }
+      });
 
       // Step 6: Select next edge
       const nextEdge = selectEdge(currentNode, outcome, context, graph);
@@ -432,6 +512,25 @@ export class PipelineRunner {
       currentNode = nextNode;
     }
 
+    // Save final checkpoint
+    const finalRetries: Record<string, number> = {};
+    for (const [nodeId, count] of nodeRetries) {
+      finalRetries[nodeId] = count;
+    }
+    const finalOutcomes: Record<string, string> = {};
+    for (const [nodeId, o] of nodeOutcomes) {
+      finalOutcomes[nodeId] = o.status;
+    }
+    await this.saveCheckpointSafe(logsRoot, {
+      timestamp: new Date().toISOString(),
+      currentNode: currentNode.id,
+      completedNodes: [...completedNodes],
+      nodeRetries: finalRetries,
+      nodeOutcomes: finalOutcomes,
+      contextValues: context.snapshot(),
+      logs: [...context.logs()],
+    });
+
     this.emitEvent(EventKind.PIPELINE_COMPLETED, {
       completedNodes,
       status: lastOutcome.status,
@@ -440,17 +539,32 @@ export class PipelineRunner {
     return { outcome: lastOutcome, completedNodes, context };
   }
 
+  private async saveCheckpointSafe(logsRoot: string, checkpoint: Checkpoint): Promise<void> {
+    try {
+      await saveCheckpoint(checkpoint, join(logsRoot, "checkpoint.json"));
+      this.emitEvent(EventKind.CHECKPOINT_SAVED, {
+        nodeId: checkpoint.currentNode,
+      });
+    } catch {
+      // Checkpoint save failure is non-fatal
+    }
+  }
+
   private emitEvent(
     kind: PipelineEventKind,
     data: Record<string, unknown>,
   ): void {
+    const event: PipelineEvent = {
+      kind,
+      timestamp: new Date(),
+      pipelineId: this.pipelineId,
+      data,
+    };
     if (this.config.eventEmitter) {
-      this.config.eventEmitter.emit({
-        kind,
-        timestamp: new Date(),
-        pipelineId: this.pipelineId,
-        data,
-      });
+      this.config.eventEmitter.emit(event);
+    }
+    if (this.config.onEvent) {
+      this.config.onEvent(event);
     }
   }
 }

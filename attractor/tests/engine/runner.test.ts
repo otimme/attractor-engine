@@ -264,34 +264,38 @@ describe("PipelineRunner", () => {
   });
 
   test("loop_restart creates fresh context with graph attrs re-mirrored", async () => {
-    let callCount = 0;
+    let workCallCount = 0;
     const registry = createHandlerRegistry();
     registry.register("start", successHandler());
     registry.register("exit", successHandler());
     registry.register("codergen", {
-      execute: async (_node, ctx) => {
-        callCount++;
-        if (callCount === 1) {
-          return createOutcome({
-            status: StageStatus.SUCCESS,
-            contextUpdates: { "stale_key": "should_be_gone" },
-            preferredLabel: "restart",
-          });
+      execute: async (node) => {
+        if (node.id === "work") {
+          workCallCount++;
+          if (workCallCount === 1) {
+            return createOutcome({
+              status: StageStatus.SUCCESS,
+              contextUpdates: { "stale_key": "should_be_gone" },
+              preferredLabel: "restart",
+            });
+          }
         }
-        // Second pass: stale_key should be absent, graph attrs should be present
         return createOutcome({ status: StageStatus.SUCCESS });
       },
     });
 
+    // loop_restart targets "setup" (not start) to avoid start_no_incoming validation
     const graph = makeGraph(
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
+        makeNode("setup", { shape: stringAttr("box") }),
         makeNode("work", { shape: stringAttr("box") }),
         makeNode("exit", { shape: stringAttr("Msquare") }),
       ],
       [
-        makeEdge("start", "work"),
-        makeEdge("work", "start", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
+        makeEdge("start", "setup"),
+        makeEdge("setup", "work"),
+        makeEdge("work", "setup", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
         makeEdge("work", "exit"),
       ],
       { goal: stringAttr("loop goal") },
@@ -332,15 +336,18 @@ describe("PipelineRunner", () => {
       },
     });
 
+    // loop_restart targets "setup" (not start) to avoid start_no_incoming validation
     const graph = makeGraph(
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
+        makeNode("setup", { shape: stringAttr("box") }),
         makeNode("work", { shape: stringAttr("box") }),
         makeNode("exit", { shape: stringAttr("Msquare") }),
       ],
       [
-        makeEdge("start", "work"),
-        makeEdge("work", "start", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
+        makeEdge("start", "setup"),
+        makeEdge("setup", "work"),
+        makeEdge("work", "setup", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
         makeEdge("work", "exit"),
       ],
     );
@@ -352,8 +359,8 @@ describe("PipelineRunner", () => {
 
     const result = await runner.run(graph);
     expect(result.outcome.status).toBe(StageStatus.SUCCESS);
-    // After restart, pipeline restarts at target (start), then work again, then exit
-    expect(records).toEqual(["start", "work", "start", "work"]);
+    // After restart, pipeline restarts at target (setup), then work again, then exit
+    expect(records).toEqual(["start", "setup", "work", "setup", "work"]);
     expect(result.completedNodes).toContain("--- restart 1 ---");
   });
 
@@ -366,13 +373,15 @@ describe("PipelineRunner", () => {
     registry.register("start", successHandler());
     registry.register("exit", successHandler());
     registry.register("codergen", {
-      execute: async () => {
-        workCallCount++;
-        if (workCallCount === 1) {
-          return createOutcome({
-            status: StageStatus.SUCCESS,
-            preferredLabel: "restart",
-          });
+      execute: async (node) => {
+        if (node.id === "work") {
+          workCallCount++;
+          if (workCallCount === 1) {
+            return createOutcome({
+              status: StageStatus.SUCCESS,
+              preferredLabel: "restart",
+            });
+          }
         }
         return createOutcome({ status: StageStatus.SUCCESS });
       },
@@ -381,12 +390,14 @@ describe("PipelineRunner", () => {
     const graph = makeGraph(
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
+        makeNode("setup", { shape: stringAttr("box") }),
         makeNode("work", { shape: stringAttr("box") }),
         makeNode("exit", { shape: stringAttr("Msquare") }),
       ],
       [
-        makeEdge("start", "work"),
-        makeEdge("work", "start", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
+        makeEdge("start", "setup"),
+        makeEdge("setup", "work"),
+        makeEdge("work", "setup", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
         makeEdge("work", "exit"),
       ],
     );
@@ -402,7 +413,7 @@ describe("PipelineRunner", () => {
     const restartEvents = events.filter((e) => e.kind === "pipeline_restarted");
     expect(restartEvents).toHaveLength(1);
     expect(restartEvents.at(0)?.data["restartCount"]).toBe(1);
-    expect(restartEvents.at(0)?.data["targetNode"]).toBe("start");
+    expect(restartEvents.at(0)?.data["targetNode"]).toBe("setup");
   });
 
   test("loop_restart increments restart counter", async () => {
@@ -414,14 +425,16 @@ describe("PipelineRunner", () => {
     registry.register("start", successHandler());
     registry.register("exit", successHandler());
     registry.register("codergen", {
-      execute: async () => {
-        workCallCount++;
-        // Restart twice, then proceed
-        if (workCallCount <= 2) {
-          return createOutcome({
-            status: StageStatus.SUCCESS,
-            preferredLabel: "restart",
-          });
+      execute: async (node) => {
+        if (node.id === "work") {
+          workCallCount++;
+          // Restart twice, then proceed
+          if (workCallCount <= 2) {
+            return createOutcome({
+              status: StageStatus.SUCCESS,
+              preferredLabel: "restart",
+            });
+          }
         }
         return createOutcome({ status: StageStatus.SUCCESS });
       },
@@ -430,12 +443,14 @@ describe("PipelineRunner", () => {
     const graph = makeGraph(
       [
         makeNode("start", { shape: stringAttr("Mdiamond") }),
+        makeNode("setup", { shape: stringAttr("box") }),
         makeNode("work", { shape: stringAttr("box") }),
         makeNode("exit", { shape: stringAttr("Msquare") }),
       ],
       [
-        makeEdge("start", "work"),
-        makeEdge("work", "start", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
+        makeEdge("start", "setup"),
+        makeEdge("setup", "work"),
+        makeEdge("work", "setup", { loop_restart: booleanAttr(true), condition: stringAttr("preferred_label=restart") }),
         makeEdge("work", "exit"),
       ],
     );

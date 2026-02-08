@@ -16,7 +16,7 @@ function makeNode(id: string, attrs: Record<string, string> = {}): Node {
 }
 
 function makeGraph(edges: Edge[]): Graph {
-  return { name: "test", attributes: new Map(), nodes: new Map(), edges };
+  return { name: "test", attributes: new Map(), nodes: new Map(), edges, subgraphs: [] };
 }
 
 function makeEdge(from: string, to: string, label?: string): Edge {

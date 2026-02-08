@@ -5,6 +5,13 @@ import type {
 } from "../types/index.js";
 import { getStringAttr, stringAttr } from "../types/index.js";
 
+/** Model-related properties eligible for graph-level default fallback. */
+const MODEL_PROPERTIES = new Set([
+  "llm_model",
+  "llm_provider",
+  "reasoning_effort",
+]);
+
 function nodeMatchesSelector(node: Node, rule: StylesheetRule): boolean {
   const { selector } = rule;
   switch (selector.kind) {
@@ -52,6 +59,16 @@ export function applyStylesheet(
       }
     }
 
+    // Step 3: Graph-level default fallback for model-related properties
+    for (const prop of MODEL_PROPERTIES) {
+      if (!newAttrs.has(prop)) {
+        const graphDefault = graph.attributes.get(prop);
+        if (graphDefault !== undefined) {
+          newAttrs.set(prop, graphDefault);
+        }
+      }
+    }
+
     newNodes.set(id, { id, attributes: newAttrs });
   }
 
@@ -60,5 +77,6 @@ export function applyStylesheet(
     attributes: graph.attributes,
     nodes: newNodes,
     edges: graph.edges,
+    subgraphs: graph.subgraphs,
   };
 }

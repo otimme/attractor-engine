@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { ToolHandler } from "../../src/handlers/tool.js";
 import { StageStatus } from "../../src/types/outcome.js";
 import { Context } from "../../src/types/context.js";
-import { stringAttr } from "../../src/types/graph.js";
+import { stringAttr, durationAttr } from "../../src/types/graph.js";
 import type { Node, Graph, AttributeValue } from "../../src/types/graph.js";
 
 function makeNode(id: string, attrs: Record<string, string> = {}): Node {
@@ -14,7 +14,7 @@ function makeNode(id: string, attrs: Record<string, string> = {}): Node {
 }
 
 function makeGraph(): Graph {
-  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [] };
+  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] };
 }
 
 describe("ToolHandler", () => {
@@ -24,7 +24,7 @@ describe("ToolHandler", () => {
 
     const outcome = await handler.execute(node, new Context(), makeGraph(), "/tmp");
     expect(outcome.status).toBe(StageStatus.SUCCESS);
-    const output = outcome.contextUpdates["tool.output"] ?? "";
+    const output = String(outcome.contextUpdates["tool.output"] ?? "");
     expect(output.trim()).toBe("hello");
   });
 
@@ -52,5 +52,20 @@ describe("ToolHandler", () => {
 
     const outcome = await handler.execute(node, new Context(), makeGraph(), "/tmp");
     expect(outcome.notes).toContain("echo ok");
+  });
+
+  it("kills process when timeout expires", async () => {
+    const handler = new ToolHandler();
+    const attrs = new Map<string, AttributeValue>();
+    attrs.set("tool_command", stringAttr("sleep 60"));
+    attrs.set("timeout", durationAttr(200, "200ms"));
+    const node: Node = { id: "slow", attributes: attrs };
+
+    const start = Date.now();
+    const outcome = await handler.execute(node, new Context(), makeGraph(), "/tmp");
+    const elapsed = Date.now() - start;
+
+    expect(outcome.status).toBe(StageStatus.FAIL);
+    expect(elapsed).toBeLessThan(5000);
   });
 });

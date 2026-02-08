@@ -39,6 +39,7 @@ export class GraphMergeTransform implements Transform {
       attributes: targetGraph.attributes,
       nodes: mergedNodes,
       edges: mergedEdges,
+      subgraphs: targetGraph.subgraphs,
     };
   }
 }

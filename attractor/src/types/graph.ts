@@ -77,11 +77,19 @@ export interface Edge {
   attributes: Map<string, AttributeValue>;
 }
 
+export interface Subgraph {
+  id: string;
+  label: string;
+  nodeIds: string[];
+  parentId: string | undefined;
+}
+
 export interface Graph {
   name: string;
   attributes: Map<string, AttributeValue>;
   nodes: Map<string, Node>;
   edges: Edge[];
+  subgraphs?: Subgraph[];
 }
 
 export function getStringAttr(

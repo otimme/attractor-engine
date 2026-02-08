@@ -23,6 +23,10 @@ export async function loadCheckpoint(path: string): Promise<Checkpoint> {
   if (!isCheckpointShape(data)) {
     throw new Error("Invalid checkpoint data");
   }
+  // Backfill nodeOutcomes for older checkpoints
+  if (!("nodeOutcomes" in data)) {
+    (data as Record<string, unknown>).nodeOutcomes = {};
+  }
   return data;
 }
 

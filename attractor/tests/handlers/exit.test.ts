@@ -9,7 +9,7 @@ function makeNode(id: string): Node {
 }
 
 function makeGraph(): Graph {
-  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [] };
+  return { name: "test", attributes: new Map(), nodes: new Map(), edges: [], subgraphs: [] };
 }
 
 describe("ExitHandler", () => {

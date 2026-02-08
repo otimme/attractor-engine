@@ -29,6 +29,7 @@ describe("checkpoint save and load", () => {
       currentNode: "implement",
       completedNodes: ["start", "plan", "implement"],
       nodeRetries: { implement: 2 },
+      nodeOutcomes: { start: "success", plan: "success", implement: "success" },
       contextValues: { "graph.goal": "build feature", outcome: "success" },
       logs: ["Started", "Plan completed"],
     };
@@ -56,6 +57,7 @@ describe("checkpoint save and load", () => {
       currentNode: "start",
       completedNodes: ["start"],
       nodeRetries: {},
+      nodeOutcomes: {},
       contextValues: {},
       logs: [],
     };
