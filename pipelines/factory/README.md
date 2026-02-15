@@ -119,7 +119,7 @@ Evolve the product by adding, modifying, or removing features. Run as needed.
 
 ![Expand pipeline](expand.png)
 
-[expand.dot](expand.dot) | Prompts: [analyze](prompts/expand/analyze.md), [propose](prompts/expand/propose.md), [execute](prompts/expand/execute.md)
+[expand.dot](expand.dot) | Prompts: [propose](prompts/expand/propose.md), [execute](prompts/expand/execute.md)
 
 ---
 

@@ -8,12 +8,11 @@ digraph expand {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    analyze [label="Analyze Intent",   prompt="@prompts/expand/analyze.md"]
     propose [label="Propose Changes",  prompt="@prompts/expand/propose.md"]
     approve [shape=hexagon,            label="Approve Changes"]
     execute [label="Execute Changes",  prompt="@prompts/expand/execute.md"]
 
-    start -> analyze -> propose -> approve
+    start -> propose -> approve
     approve -> execute [label="[A] Accept"]
     approve -> propose [label="[R] Revise"]
     execute -> exit
