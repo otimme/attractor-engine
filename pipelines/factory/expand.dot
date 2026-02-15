@@ -8,7 +8,7 @@ digraph expand {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    propose [label="Propose Changes",  prompt="@prompts/expand/propose.md"]
+    propose [label="Propose Changes",  prompt="@prompts/expand/propose.md", reasoning_effort="high"]
     approve [shape=hexagon,            label="Approve Changes"]
     execute [label="Execute Changes",  prompt="@prompts/expand/execute.md"]
 

@@ -8,7 +8,7 @@ digraph seed {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    ingest [label="Ingest Artifacts",    prompt="@prompts/seed/ingest.md"]
+    ingest [label="Ingest Artifacts",    prompt="@prompts/seed/ingest.md", reasoning_effort="high"]
     draft  [label="Draft Product Docs",  prompt="@prompts/seed/draft.md"]
     review [shape=hexagon,               label="Review Product Docs"]
 

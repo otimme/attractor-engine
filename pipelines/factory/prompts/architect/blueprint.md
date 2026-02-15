@@ -30,3 +30,8 @@ Key components, states, interactions. Use foundation frontend stack (React, shad
 Adjacent concerns, optimizations, or features explicitly excluded from this blueprint. The implementing agent must not address anything listed here.
 
 The blueprint must be detailed enough for an agent to implement without further clarification.
+
+Before completing, self-verify:
+- Every acceptance criterion from the feature requirements is addressed by at least one section
+- Nothing in the blueprint contradicts the foundation blueprints
+- The Out of Scope section explicitly excludes adjacent concerns that an implementing agent might drift into
