@@ -8,6 +8,8 @@ digraph implement {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
+    strategy [shape=hexagon, label="Choose decomposition strategy:"]
+
     subgraph cluster_impl {
         label="Implementation Loop"
         node [fidelity="full", thread_id="impl"]
@@ -18,7 +20,12 @@ digraph implement {
         fix       [label="Fix Failures",         prompt="@prompts/implement/fix.md"]
     }
 
-    start -> plan -> implement -> validate
+    start -> strategy
+    strategy -> plan [label="[L] Layer-by-layer"]
+    strategy -> plan [label="[F] Feature slice"]
+    strategy -> plan [label="[P] Embarrassingly parallel"]
+    strategy -> plan [label="[S] Sequential / linear"]
+    plan -> implement -> validate
     validate -> exit [condition="outcome=success"]
     validate -> fix  [condition="outcome!=success", label="Fix"]
     fix -> validate

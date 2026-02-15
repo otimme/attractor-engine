@@ -3,12 +3,14 @@ Read the foundation blueprints under docs-internal/architecture/foundation-bluep
 Read the acceptance criteria from the matching doc under docs-internal/product/features/.
 Read the relevant existing source code.
 
-Decompose the blueprint into ordered implementation steps:
-1. Database migrations and schema changes
-2. Data models and ORM definitions
-3. API endpoints and business logic
-4. UI components and state management
-5. Tests for each layer
+Decomposition strategy: $context.human.gate.label
+
+Decompose the blueprint into ordered implementation steps using the chosen strategy:
+
+- **Layer-by-layer:** Group steps by technical layer — database migrations, then data models, then API endpoints, then UI components, then tests for each layer.
+- **Feature slice:** Group steps by user-facing capability — each step delivers a vertical slice from database through UI for one piece of functionality.
+- **Embarrassingly parallel:** Identify steps with no dependencies on each other and group them for concurrent implementation. Mark dependency ordering explicitly.
+- **Sequential / linear:** One step per logical change, strictly ordered, each building on the previous.
 
 For each step, specify the exact files to create or modify and what changes to make.
 
