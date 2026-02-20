@@ -1,0 +1,15 @@
+digraph holdout {
+    graph [
+        goal="",
+        label="Holdout Gate"
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    run_holdout [label="Run Holdout Scenarios",
+        prompt="@prompts/holdout/run-holdout.md"]
+
+    start -> run_holdout -> exit
+}
