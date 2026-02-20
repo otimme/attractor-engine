@@ -1,0 +1,24 @@
+digraph test_agent {
+    graph [
+        goal="",
+        label="Test Agent"
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    subgraph cluster_test {
+        label="Scenario Testing"
+        node [fidelity="full", thread_id="test"]
+
+        read_scenarios [label="Read Scenarios",
+            prompt="@prompts/test-agent/read-scenarios.md"]
+        run_scenarios  [label="Run Scenarios",
+            prompt="@prompts/test-agent/run-scenarios.md"]
+        report         [label="Report Results",
+            prompt="@prompts/test-agent/report.md"]
+    }
+
+    start -> read_scenarios -> run_scenarios -> report -> exit
+}
