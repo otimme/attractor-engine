@@ -1,0 +1,23 @@
+digraph spec_validate {
+    graph [
+        goal="",
+        label="Spec Validation"
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    interrogate [label="Interrogate User Idea",
+        prompt="@prompts/spec-validate/interrogate.md"]
+
+    draft [label="Draft Three Documents",
+        prompt="@prompts/spec-validate/draft-docs.md"]
+
+    review [shape=hexagon,
+        label="Review Documents"]
+
+    start -> interrogate -> draft -> review
+    review -> exit  [label="[A] Accept"]
+    review -> draft [label="[R] Revise"]
+}
