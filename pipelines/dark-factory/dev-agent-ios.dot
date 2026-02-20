@@ -1,0 +1,45 @@
+digraph dev_agent_ios {
+    graph [
+        goal="",
+        label="Dev Agent (iOS)"
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    subgraph cluster_impl {
+        label="iOS Implementation Loop"
+        node [fidelity="full", thread_id="dev-ios"]
+
+        read_spec     [label="Read Spec",
+            prompt="@prompts/dev-agent-ios/read-spec.md"]
+        architect     [label="iOS Architect",
+            prompt="@prompts/dev-agent-ios/architect.md",
+            reasoning_effort="high"]
+        build         [label="Swift Builder",
+            prompt="@prompts/dev-agent-ios/build.md"]
+        data_model    [label="SwiftData Engineer",
+            prompt="@prompts/dev-agent-ios/data-model.md"]
+        review        [label="Swift Code Review",
+            prompt="@prompts/dev-agent-ios/review.md"]
+        accessibility [label="Accessibility Specialist",
+            prompt="@prompts/dev-agent-ios/accessibility.md"]
+        security      [label="iOS Security Auditor",
+            prompt="@prompts/dev-agent-ios/security.md"]
+        optimize      [label="Swift Code Optimizer",
+            prompt="@prompts/dev-agent-ios/optimize.md"]
+        unit_test     [label="iOS Test Engineer",
+            prompt="@prompts/dev-agent-ios/unit-test.md",
+            goal_gate=true]
+        fix           [label="Fix Failures",
+            prompt="@prompts/dev-agent-ios/fix.md",
+            max_visits=3]
+    }
+
+    start -> read_spec -> architect -> build -> data_model -> review
+    review -> accessibility -> security -> optimize -> unit_test
+    unit_test -> exit [condition="outcome=success"]
+    unit_test -> fix  [condition="outcome!=success", label="Fix"]
+    fix -> unit_test
+}
