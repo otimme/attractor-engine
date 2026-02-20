@@ -19,7 +19,7 @@ export { validate, validateOrRaise, ValidationError, BUILT_IN_RULES } from "./va
 export { parseStylesheet, applyStylesheet } from "./stylesheet/index.js";
 
 // Transforms
-export { VariableExpansionTransform, StylesheetTransform, GraphMergeTransform, TransformRegistry, builtInTransforms } from "./transforms/index.js";
+export { VariableExpansionTransform, StylesheetTransform, GraphMergeTransform, PromptFileTransform, TransformRegistry, builtInTransforms } from "./transforms/index.js";
 
 // Interviewers
 export {

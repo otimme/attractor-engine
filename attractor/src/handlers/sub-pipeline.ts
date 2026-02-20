@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Handler } from "../types/handler.js";
 import type { Node, Graph } from "../types/graph.js";
 import type { Context } from "../types/context.js";
 import type { Outcome } from "../types/outcome.js";
 import type { CodergenBackend } from "../types/handler.js";
-import { getStringAttr } from "../types/graph.js";
+import { getStringAttr, stringAttr } from "../types/graph.js";
 import { StageStatus, createOutcome } from "../types/outcome.js";
 import { PipelineRunner } from "../engine/runner.js";
 import type { HandlerRegistry } from "../engine/runner.js";
@@ -63,6 +64,9 @@ export class SubPipelineHandler implements Handler {
         failureReason: `Failed to parse DOT file ${dotFilePath}: ${message}`,
       });
     }
+
+    // Set _prompt_base so PromptFileTransform can resolve @ paths
+    childGraph.attributes.set("_prompt_base", stringAttr(dirname(dotFilePath)));
 
     // Create a child PipelineRunner with a subset of the parent config
     const childRunner = new PipelineRunner({
