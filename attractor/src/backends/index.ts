@@ -5,5 +5,6 @@ export type { SessionBackendConfig } from "./session-backend.js";
 export { CliAgentBackend } from "./cli-backend.js";
 export type { CliAgentConfig } from "./cli-backend.js";
 export { ClaudeCodeBackend } from "./claude-code-backend.js";
+export type { ClaudeUsage, ClaudeUsageReport } from "./claude-code-backend.js";
 export { CodexBackend } from "./codex-backend.js";
 export { GeminiBackend } from "./gemini-backend.js";

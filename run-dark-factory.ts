@@ -12,7 +12,7 @@
  * Logs are written to ../output/<project-name>/logs/.
  */
 
-import { readFileSync, mkdirSync } from "fs";
+import { readFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, join } from "path";
 import {
   parse,
@@ -31,6 +31,7 @@ import {
   StageStatus,
   stringAttr,
 } from "./attractor/src/index.js";
+import type { ClaudeUsageReport } from "./attractor/src/index.js";
 
 // --- Parse arguments ---
 
@@ -52,7 +53,7 @@ mkdirSync(join(outputDir, "holdout"), { recursive: true });
 console.log(`\n=== Dark Factory ===`);
 console.log(`Project: ${projectName}`);
 console.log(`Output:  ${outputDir}`);
-console.log(`Backend: ClaudeCodeBackend (claude --print)`);
+console.log(`Backend: ClaudeCodeBackend (claude --print --output-format json)`);
 console.log();
 
 // --- Set up backend and handlers ---
@@ -82,6 +83,54 @@ graph.attributes.set("_prompt_base", stringAttr(dirname(dotPath)));
 console.log(`Pipeline: ${graph.name} (${graph.nodes.size} nodes, ${graph.edges.length} edges)`);
 console.log();
 
+// --- Usage tracking ---
+
+const logsRoot = join(outputDir, "logs");
+
+interface UsageTotals {
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  duration_ms: number;
+  duration_api_ms: number;
+  num_turns: number;
+  nodes: number;
+}
+
+const totals: UsageTotals = {
+  cost_usd: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0,
+  duration_ms: 0,
+  duration_api_ms: 0,
+  num_turns: 0,
+  nodes: 0,
+};
+
+function readNodeUsage(nodeId: string): ClaudeUsageReport | null {
+  const usagePath = join(logsRoot, nodeId, "usage.json");
+  if (!existsSync(usagePath)) return null;
+  try {
+    return JSON.parse(readFileSync(usagePath, "utf-8")) as ClaudeUsageReport;
+  } catch {
+    return null;
+  }
+}
+
+function formatCost(usd: number): string {
+  return `$${usd.toFixed(4)}`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 // --- Event logging ---
 
 const emitter = new PipelineEventEmitter();
@@ -95,7 +144,24 @@ const emitter = new PipelineEventEmitter();
       }
       case PipelineEventKind.STAGE_COMPLETED: {
         const data = event.data as Record<string, unknown>;
-        console.log(`  [${new Date().toISOString()}] Completed: ${data["nodeId"]}`);
+        const nodeId = data["nodeId"] as string;
+        console.log(`  [${new Date().toISOString()}] Completed: ${nodeId}`);
+
+        // Read and report usage for this node
+        const usage = readNodeUsage(nodeId);
+        if (usage) {
+          totals.cost_usd += usage.cost_usd;
+          totals.input_tokens += usage.usage.input_tokens;
+          totals.output_tokens += usage.usage.output_tokens;
+          totals.cache_creation_input_tokens += usage.usage.cache_creation_input_tokens;
+          totals.cache_read_input_tokens += usage.usage.cache_read_input_tokens;
+          totals.duration_ms += usage.duration_ms;
+          totals.duration_api_ms += usage.duration_api_ms;
+          totals.num_turns += usage.num_turns;
+          totals.nodes += 1;
+
+          console.log(`    Cost: ${formatCost(usage.cost_usd)} | In: ${formatTokens(usage.usage.input_tokens)} | Out: ${formatTokens(usage.usage.output_tokens)} | Cache: ${formatTokens(usage.usage.cache_read_input_tokens)} read, ${formatTokens(usage.usage.cache_creation_input_tokens)} created | API: ${(usage.duration_api_ms / 1000).toFixed(1)}s | Turns: ${usage.num_turns}`);
+        }
         break;
       }
       case PipelineEventKind.PIPELINE_COMPLETED:
@@ -118,7 +184,7 @@ const runner = new PipelineRunner({
   handlerRegistry: registry,
   eventEmitter: emitter,
   backend,
-  logsRoot: join(outputDir, "logs"),
+  logsRoot,
 });
 
 const result = await runner.run(graph);
@@ -137,6 +203,22 @@ if (result.outcome.status === StageStatus.FAIL) {
   process.exit(1);
 }
 
+// --- Usage summary ---
+
+if (totals.nodes > 0) {
+  console.log();
+  console.log(`=== Token Usage ===`);
+  console.log(`Nodes with usage data: ${totals.nodes}`);
+  console.log(`Total cost:            ${formatCost(totals.cost_usd)}`);
+  console.log(`Input tokens:          ${formatTokens(totals.input_tokens)}`);
+  console.log(`Output tokens:         ${formatTokens(totals.output_tokens)}`);
+  console.log(`Cache read tokens:     ${formatTokens(totals.cache_read_input_tokens)}`);
+  console.log(`Cache created tokens:  ${formatTokens(totals.cache_creation_input_tokens)}`);
+  console.log(`Total turns:           ${totals.num_turns}`);
+  console.log(`Total API time:        ${(totals.duration_api_ms / 1000).toFixed(1)}s`);
+  console.log(`Total wall time:       ${(totals.duration_ms / 1000).toFixed(1)}s`);
+}
+
 console.log();
 console.log(`Output written to: ${outputDir}`);
-console.log(`Logs written to: ${join(outputDir, "logs")}`);
+console.log(`Logs written to: ${logsRoot}`);

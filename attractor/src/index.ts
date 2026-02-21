@@ -79,7 +79,7 @@ export type {
 
 // Backends
 export { StubBackend, SessionBackend, CliAgentBackend, ClaudeCodeBackend, CodexBackend, GeminiBackend } from "./backends/index.js";
-export type { StubResponseFn, SessionBackendConfig, CliAgentConfig } from "./backends/index.js";
+export type { StubResponseFn, SessionBackendConfig, CliAgentConfig, ClaudeUsage, ClaudeUsageReport } from "./backends/index.js";
 
 // Events
 export { PipelineEventEmitter } from "./events/index.js";

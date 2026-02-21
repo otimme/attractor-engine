@@ -34,6 +34,16 @@ export abstract class CliAgentBackend implements CodergenBackend {
     options?: BackendRunOptions,
   ): string[];
 
+  /** Subclasses override to parse/transform the CLI response. */
+  protected parseResponse(
+    stdout: string,
+    _stderr: string,
+    _node: Node,
+    _options?: BackendRunOptions,
+  ): string | Outcome {
+    return stdout;
+  }
+
   async run(
     node: Node,
     prompt: string,
@@ -90,7 +100,7 @@ export abstract class CliAgentBackend implements CodergenBackend {
           );
           return;
         }
-        resolve(stdout);
+        resolve(this.parseResponse(stdout, stderr, node, options));
       });
 
       // Send prompt via stdin
