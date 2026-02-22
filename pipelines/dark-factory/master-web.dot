@@ -1,0 +1,35 @@
+digraph dark_factory_web {
+    graph [
+        goal="",
+        label="Dark Factory (Web)"
+    ]
+    rankdir=TB
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    dev_agent_web [label="Dev Agent (Web)",
+        type="sub_pipeline",
+        sub_pipeline="pipelines/dark-factory/dev-agent-web.dot",
+        max_visits=5]
+
+    test_agent [label="Test Agent",
+        type="sub_pipeline",
+        sub_pipeline="pipelines/dark-factory/test-agent.dot",
+        max_visits=5]
+
+    judge [label="Judge",
+        prompt="@prompts/judge/score.md",
+        max_visits=5]
+
+    holdout [label="Holdout Gate",
+        type="sub_pipeline",
+        sub_pipeline="pipelines/dark-factory/holdout.dot"]
+
+    start -> dev_agent_web
+    dev_agent_web -> test_agent
+    test_agent -> judge
+    judge -> dev_agent_web [condition="outcome!=success", label="Not converged"]
+    judge -> holdout       [condition="outcome=success",  label="Converged"]
+    holdout -> exit
+}

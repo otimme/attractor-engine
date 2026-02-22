@@ -1,0 +1,36 @@
+digraph dev_agent_web {
+    graph [
+        goal="",
+        label="Dev Agent (Web)"
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare,  label="Exit"]
+
+    subgraph cluster_impl {
+        label="Web Implementation Loop"
+        node [fidelity="full", thread_id="dev-web"]
+
+        read_spec     [label="Read Spec",
+            prompt="@prompts/dev-agent-web/read-spec.md"]
+        architect     [label="Web Architect",
+            prompt="@prompts/dev-agent-web/architect.md",
+            reasoning_effort="high"]
+        build         [label="Web Builder",
+            prompt="@prompts/dev-agent-web/build.md"]
+        review        [label="Web Code Review",
+            prompt="@prompts/dev-agent-web/review.md"]
+        unit_test     [label="Web Test Engineer",
+            prompt="@prompts/dev-agent-web/unit-test.md",
+            goal_gate=true]
+        fix           [label="Fix Failures",
+            prompt="@prompts/dev-agent-web/fix.md",
+            max_visits=3]
+    }
+
+    start -> read_spec -> architect -> build -> review -> unit_test
+    unit_test -> exit [condition="outcome=success"]
+    unit_test -> fix  [condition="outcome!=success", label="Fix"]
+    fix -> unit_test
+}

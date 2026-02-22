@@ -6,14 +6,19 @@
  * Runs the full Dark Factory pipeline with ClaudeCodeBackend (Claude Code CLI).
  * Requires Claude Code installed with an active Max subscription.
  *
- * Usage: bun run-dark-factory.ts <project-name>
+ * Usage: bun run-dark-factory.ts <project-name> [pipeline.dot] [--specs <dir>]
+ *
+ * Arguments:
+ *   project-name    Name for this run (used for output directory)
+ *   pipeline.dot    Path to DOT file (default: pipelines/dark-factory/master.dot)
+ *   --specs <dir>   Copy doc-a/b/c from this directory to the output dir before running
  *
  * Output is written to ../output/<project-name>/.
  * Logs are written to ../output/<project-name>/logs/.
  */
 
-import { readFileSync, mkdirSync, existsSync } from "fs";
-import { dirname, join } from "path";
+import { readFileSync, mkdirSync, existsSync, copyFileSync } from "fs";
+import { dirname, join, resolve } from "path";
 import {
   parse,
   PipelineRunner,
@@ -35,11 +40,25 @@ import type { ClaudeUsageReport } from "./attractor/src/index.js";
 
 // --- Parse arguments ---
 
-const projectName = process.argv[2];
+const args = process.argv.slice(2);
+const specsIdx = args.indexOf("--specs");
+let specsDir: string | undefined;
+if (specsIdx !== -1) {
+  specsDir = args[specsIdx + 1];
+  if (!specsDir) {
+    console.error("Error: --specs requires a directory path");
+    process.exit(1);
+  }
+  args.splice(specsIdx, 2);
+}
+
+const projectName = args[0];
 if (!projectName) {
-  console.error("Usage: bun run-dark-factory.ts <project-name>");
+  console.error("Usage: bun run-dark-factory.ts <project-name> [pipeline.dot] [--specs <dir>]");
   process.exit(1);
 }
+
+const dotPath = args[1] || "pipelines/dark-factory/master.dot";
 
 // --- Create output directories ---
 
@@ -50,10 +69,35 @@ mkdirSync(join(outputDir, "test", "scenario-results"), { recursive: true });
 mkdirSync(join(outputDir, "judge"), { recursive: true });
 mkdirSync(join(outputDir, "holdout"), { recursive: true });
 
+// --- Copy spec documents if --specs provided ---
+
+if (specsDir) {
+  const resolvedSpecsDir = resolve(specsDir);
+  const specFiles = [
+    { src: "doc-a-product-spec.md", dst: "doc-a-product-spec.md" },
+    { src: "doc-b-scenario-tests.md", dst: "doc-b-scenario-tests.md" },
+    { src: "doc-c-holdout-tests.md", dst: "doc-c-holdout.md" },
+  ];
+
+  for (const { src, dst } of specFiles) {
+    const srcPath = join(resolvedSpecsDir, src);
+    const dstPath = join(outputDir, dst);
+    if (existsSync(srcPath)) {
+      copyFileSync(srcPath, dstPath);
+      console.log(`Copied: ${src} → ${dstPath}`);
+    } else {
+      console.warn(`Warning: spec file not found: ${srcPath}`);
+    }
+  }
+  console.log();
+}
+
 console.log(`\n=== Dark Factory ===`);
-console.log(`Project: ${projectName}`);
-console.log(`Output:  ${outputDir}`);
-console.log(`Backend: ClaudeCodeBackend (claude --print --output-format json)`);
+console.log(`Project:  ${projectName}`);
+console.log(`Pipeline: ${dotPath}`);
+console.log(`Output:   ${outputDir}`);
+console.log(`Backend:  ClaudeCodeBackend (claude --print --output-format json)`);
+if (specsDir) console.log(`Specs:    ${resolve(specsDir)}`);
 console.log();
 
 // --- Set up backend and handlers ---
@@ -71,9 +115,8 @@ registry.register("sub_pipeline", new SubPipelineHandler({
   backend: backend,
 }));
 
-// --- Load and prepare master pipeline ---
+// --- Load and prepare pipeline ---
 
-const dotPath = "pipelines/dark-factory/master.dot";
 const dotSource = readFileSync(dotPath, "utf-8");
 const graph = parse(dotSource);
 
