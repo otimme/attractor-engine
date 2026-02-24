@@ -329,6 +329,8 @@ export class PipelineRunner {
     } = state;
     const baseLogsRoot = state.logsRoot;
     let logsRoot = baseLogsRoot;
+    const maxSteps = getIntegerAttr(graph.attributes, "max_steps", 200);
+    let stepCount = completedNodes.length; // account for resumed pipelines
 
     while (true) {
       // Check for cancellation via AbortSignal
@@ -346,6 +348,22 @@ export class PipelineRunner {
           artifactStore,
         };
       }
+
+      // Global step limit: prevent runaway loops
+      if (stepCount >= maxSteps) {
+        const reason = `Pipeline exceeded max_steps=${maxSteps} (${stepCount} steps executed)`;
+        this.emitEvent(EventKind.PIPELINE_FAILED, { reason, nodeId: currentNode.id });
+        return {
+          outcome: createOutcome({
+            status: StageStatus.FAIL,
+            failureReason: reason,
+          }),
+          completedNodes,
+          context,
+          artifactStore,
+        };
+      }
+      stepCount++;
 
       // Step 1: Check for terminal node
       if (isTerminal(currentNode)) {

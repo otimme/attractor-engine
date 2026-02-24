@@ -14,6 +14,8 @@ export interface CliAgentConfig {
   env?: Record<string, string>;
   /** Timeout in milliseconds. Default: 300_000 (5 min) */
   timeoutMs?: number;
+  /** Working directory for the subprocess */
+  cwd?: string;
 }
 
 /**
@@ -54,8 +56,13 @@ export abstract class CliAgentBackend implements CodergenBackend {
     const timeoutMs = this.config.timeoutMs ?? 300_000;
 
     return new Promise<string | Outcome>((resolve) => {
+      // Unset CLAUDECODE to allow spawning Claude Code from within a Claude Code session.
+      // Without this, nested invocations are blocked with:
+      // "Claude Code cannot be launched inside another Claude Code session."
+      const { CLAUDECODE: _, ...parentEnv } = process.env;
       const child = spawn(this.config.command, args, {
-        env: { ...process.env, ...this.config.env },
+        env: { ...parentEnv, ...this.config.env },
+        cwd: this.config.cwd,
         stdio: ["pipe", "pipe", "pipe"],
       });
 

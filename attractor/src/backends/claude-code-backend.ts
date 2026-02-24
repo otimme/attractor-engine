@@ -30,6 +30,7 @@ export class ClaudeCodeBackend extends CliAgentBackend {
       defaultArgs: config?.defaultArgs ?? ["--print", "--output-format", "json"],
       env: config?.env,
       timeoutMs: config?.timeoutMs,
+      cwd: config?.cwd,
     });
   }
 
