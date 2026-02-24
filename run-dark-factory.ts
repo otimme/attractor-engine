@@ -35,8 +35,11 @@ import {
   PipelineEventKind,
   StageStatus,
   stringAttr,
+  createServer,
+  WebInterviewer,
+  expandDotForVisualization,
 } from "./attractor/src/index.js";
-import type { ClaudeUsageReport } from "./attractor/src/index.js";
+import type { ClaudeUsageReport, PipelineRecord } from "./attractor/src/index.js";
 
 // --- Parse arguments ---
 
@@ -102,7 +105,15 @@ console.log();
 
 // --- Set up backend and handlers ---
 
-const backend = new ClaudeCodeBackend();
+const backend = new ClaudeCodeBackend({
+  cwd: resolve(outputDir),
+  timeoutMs: 900_000, // 15 min — claude --print needs time for complex prompts
+  defaultArgs: [
+    "--print",
+    "--output-format", "json",
+    "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", "Bash", "Task",
+  ],
+});
 
 const registry = createHandlerRegistry();
 registry.register("start", new StartHandler());
@@ -125,6 +136,11 @@ graph.attributes.set("_prompt_base", stringAttr(dirname(dotPath)));
 
 console.log(`Pipeline: ${graph.name} (${graph.nodes.size} nodes, ${graph.edges.length} edges)`);
 console.log();
+
+// --- Expand DOT for dashboard visualization ---
+
+// sub_pipeline paths in DOT files are relative to the engine working directory (CWD)
+const expandedDotSource = expandDotForVisualization(dotSource, ".");
 
 // --- Usage tracking ---
 
@@ -219,6 +235,35 @@ const emitter = new PipelineEventEmitter();
   }
 })();
 
+// --- Dashboard server ---
+
+const server = createServer({
+  port: 3000,
+  runnerConfig: {
+    handlerRegistry: registry,
+    backend,
+    logsRoot,
+  },
+});
+
+const pipelineId = projectName;
+const interviewer = new WebInterviewer();
+
+const record: PipelineRecord = {
+  id: pipelineId,
+  status: "running",
+  result: undefined,
+  latestCheckpoint: undefined,
+  dotSource: expandedDotSource,
+  emitter,
+  interviewer,
+  abortController: new AbortController(),
+};
+server.pipelines.set(pipelineId, record);
+
+console.log(`Dashboard: http://localhost:${server.port}/`);
+console.log();
+
 // --- Run ---
 
 const startTime = Date.now();
@@ -228,6 +273,9 @@ const runner = new PipelineRunner({
   eventEmitter: emitter,
   backend,
   logsRoot,
+  onCheckpoint(checkpoint) {
+    record.latestCheckpoint = checkpoint;
+  },
 });
 
 const result = await runner.run(graph);
@@ -243,7 +291,6 @@ console.log(`Elapsed: ${minutes}m ${seconds}s`);
 
 if (result.outcome.status === StageStatus.FAIL) {
   console.log(`Failure: ${result.outcome.failureReason}`);
-  process.exit(1);
 }
 
 // --- Usage summary ---
@@ -265,3 +312,17 @@ if (totals.nodes > 0) {
 console.log();
 console.log(`Output written to: ${outputDir}`);
 console.log(`Logs written to: ${logsRoot}`);
+
+// --- Stop dashboard server ---
+
+record.result = result;
+record.status = result.outcome.status === StageStatus.FAIL ? "failed" : "completed";
+emitter.close();
+
+// Brief delay so dashboard receives final events before server stops
+await new Promise(r => setTimeout(r, 2000));
+server.stop();
+
+if (result.outcome.status === StageStatus.FAIL) {
+  process.exit(1);
+}

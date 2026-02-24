@@ -357,6 +357,30 @@ export async function handleRequest(
     return handlePostPipeline(request, ctx);
   }
 
+  // GET / — serve dashboard HTML
+  if (method === "GET" && url.pathname === "/") {
+    const dashboardPath = decodeURIComponent(new URL(
+      "../../../../output/pipeline-dashboard/index.html",
+      import.meta.url,
+    ).pathname);
+    const file = Bun.file(dashboardPath);
+    if (await file.exists()) {
+      return new Response(file, {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      });
+    }
+    return errorResponse("Dashboard not found", 404);
+  }
+
+  // GET /pipelines — list all pipelines
+  if (method === "GET" && url.pathname === "/pipelines") {
+    const list = Array.from(ctx.pipelines.values()).map((r) => ({
+      id: r.id,
+      status: r.status,
+    }));
+    return jsonResponse(list);
+  }
+
   const pipelineId = getPipelineId(url);
   if (!pipelineId) {
     return errorResponse("Not found", 404);

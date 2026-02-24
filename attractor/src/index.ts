@@ -4,6 +4,7 @@ export * from "./types/index.js";
 // Utilities
 export { parseDuration, isDurationString } from "./utils/duration.js";
 export { normalizeLabel, parseAcceleratorKey, deriveClassName } from "./utils/label.js";
+export { expandDotForVisualization } from "./utils/expand-dot.js";
 
 // Parser
 export { parse, tokenize, parseTokens, LexerError, ParseError } from "./parser/index.js";
