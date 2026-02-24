@@ -261,7 +261,9 @@ const record: PipelineRecord = {
 };
 server.pipelines.set(pipelineId, record);
 
-console.log(`Dashboard: http://localhost:${server.port}/`);
+const dashboardUrl = `http://localhost:${server.port}/`;
+console.log(`Dashboard: ${dashboardUrl}`);
+Bun.spawn(["open", dashboardUrl]);
 console.log();
 
 // --- Run ---
