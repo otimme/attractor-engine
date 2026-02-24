@@ -31,7 +31,8 @@ digraph dev_agent_ios {
             prompt="@prompts/dev-agent-ios/optimize.md"]
         unit_test     [label="iOS Test Engineer",
             prompt="@prompts/dev-agent-ios/unit-test.md",
-            goal_gate=true]
+            goal_gate=true,
+            max_visits=6]
         fix           [label="Fix Failures",
             prompt="@prompts/dev-agent-ios/fix.md",
             max_visits=3]
@@ -41,5 +42,6 @@ digraph dev_agent_ios {
     review -> accessibility -> security -> optimize -> unit_test
     unit_test -> exit [condition="outcome=success"]
     unit_test -> fix  [condition="outcome!=success", label="Fix"]
-    fix -> unit_test
+    fix -> unit_test  [condition="outcome=success", label="Retest"]
+    fix -> exit       [condition="outcome!=success", label="Give up"]
 }

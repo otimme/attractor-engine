@@ -59,11 +59,11 @@ Run all tests with Bun. Report results:
 
 ## Output and Outcome
 
-If ALL route tests pass:
-- Set outcome to **success**
-- Report the full test results
+Run the tests and report results. Then set the outcome based on this **strict, non-negotiable rule**:
 
-If ANY test fails:
-- Set outcome to **fail**
-- List every failing test with details
-- This triggers the fix loop — the Fix node will address the failures
+- **ALL tests pass → outcome = success**
+- **ANY test fails → outcome = fail**
+
+There are no exceptions. Do not rationalize failures as "out of scope", "not my code", "a different component's bug", or "technically correct." If a test you wrote fails, the outcome is fail. If the failure is caused by a bug in code outside your control, the outcome is still fail — the fix node exists to address it.
+
+The only reason to mark a test as passing is that `bun test` reports it as passing. Your judgment about whether a failure "counts" is irrelevant. The test runner is the sole arbiter.

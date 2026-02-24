@@ -52,12 +52,22 @@ Review all code produced so far. Focus on issues that cause bugs, security vulne
 - [ ] Does `GET /pipelines` return valid JSON in the expected format?
 - [ ] Are error cases handled (file not found, no pipelines)?
 
+## Rules
+
+- **Report only. Do NOT modify any files.** Your job is to find issues, not fix them. A separate fix node applies your recommendations.
+- Be specific — file, line number, exact code snippet, and the exact fix needed.
+- Prioritize by severity: security > crash > memory leak > correctness > maintainability.
+- If you find zero issues, say so explicitly.
+
 ## Output
 
 List every issue found with:
-1. File and location
-2. What the issue is
+1. File and line number
+2. The problematic code (exact snippet)
 3. Why it matters (security risk, memory leak, crash, maintenance burden)
-4. The fix (exact code change)
+4. The fix (exact code change to make)
 
-Apply all fixes to the codebase.
+## Outcome
+
+- If you found **zero issues**: set outcome to **success**
+- If you found **any issues**: set outcome to **fail** with the full issue list
