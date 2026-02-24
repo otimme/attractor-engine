@@ -62,8 +62,10 @@ const nodeSequence = [
   // Dev Agent (Web) sub-pipeline
   "dev_agent_web_read_spec",
   "dev_agent_web_architect",
+  "dev_agent_web_ux_briefing",
   "dev_agent_web_build",
   "dev_agent_web_review",
+  "dev_agent_web_ux_review",
   "dev_agent_web_unit_test",
   // Test Agent sub-pipeline
   "test_agent_read_scenarios",

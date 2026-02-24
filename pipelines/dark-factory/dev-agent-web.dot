@@ -17,20 +17,48 @@ digraph dev_agent_web {
         architect     [label="Web Architect",
             prompt="@prompts/dev-agent-web/architect.md",
             reasoning_effort="high"]
+        ux_briefing   [label="UX Briefing",
+            prompt="@prompts/dev-agent-web/ux-briefing.md"]
         build         [label="Web Builder",
             prompt="@prompts/dev-agent-web/build.md"]
         review        [label="Web Code Review",
-            prompt="@prompts/dev-agent-web/review.md"]
+            prompt="@prompts/dev-agent-web/review.md",
+            max_visits=3]
+        fix_review    [label="Fix Review Issues",
+            prompt="@prompts/dev-agent-web/fix-review.md",
+            max_visits=3]
+        ux_review     [label="UX Review",
+            prompt="@prompts/dev-agent-web/ux-review.md",
+            max_visits=3]
+        fix_ux        [label="Fix UX Issues",
+            prompt="@prompts/dev-agent-web/fix-ux.md",
+            max_visits=3]
         unit_test     [label="Web Test Engineer",
             prompt="@prompts/dev-agent-web/unit-test.md",
-            goal_gate=true]
-        fix           [label="Fix Failures",
+            goal_gate=true,
+            max_visits=6]
+        fix           [label="Fix Test Failures",
             prompt="@prompts/dev-agent-web/fix.md",
             max_visits=3]
     }
 
-    start -> read_spec -> architect -> build -> review -> unit_test
+    start -> read_spec -> architect -> ux_briefing -> build -> review
+
+    // Review loop: review finds issues → fix them → re-review
+    review -> ux_review     [condition="outcome=success", label="Clean"]
+    review -> fix_review    [condition="outcome!=success", label="Issues found"]
+    fix_review -> review    [condition="outcome=success", label="Re-review"]
+    fix_review -> ux_review [condition="outcome!=success", label="Move on"]
+
+    // UX review loop: ux review finds visual issues → fix them → re-review
+    ux_review -> unit_test  [condition="outcome=success", label="Looks good"]
+    ux_review -> fix_ux     [condition="outcome!=success", label="Visual issues"]
+    fix_ux -> ux_review     [condition="outcome=success", label="Re-review"]
+    fix_ux -> unit_test     [condition="outcome!=success", label="Move on"]
+
+    // Test loop: tests fail → fix them → re-test
     unit_test -> exit [condition="outcome=success"]
     unit_test -> fix  [condition="outcome!=success", label="Fix"]
-    fix -> unit_test
+    fix -> unit_test  [condition="outcome=success", label="Retest"]
+    fix -> exit       [condition="outcome!=success", label="Give up"]
 }
