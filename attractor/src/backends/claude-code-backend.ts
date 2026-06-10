@@ -24,6 +24,12 @@ export interface ClaudeUsageReport {
 }
 
 export class ClaudeCodeBackend extends CliAgentBackend {
+  /**
+   * Maps thread IDs to Claude Code session IDs.
+   * First node in a thread starts a new session; subsequent nodes resume it via --resume.
+   */
+  private readonly sessionsByThread = new Map<string, string>();
+
   constructor(config?: Partial<CliAgentConfig>) {
     super({
       command: config?.command ?? "claude",
@@ -37,13 +43,21 @@ export class ClaudeCodeBackend extends CliAgentBackend {
   protected buildArgs(
     _prompt: string,
     node: Node,
-    _options?: BackendRunOptions,
+    options?: BackendRunOptions,
   ): string[] {
     const args = [...(this.config.defaultArgs ?? [])];
 
     const model = getStringAttr(node.attributes, "llm_model");
     if (model !== "") {
       args.push("--model", model);
+    }
+
+    // Resume an existing session if this thread already has one
+    if (options?.threadId) {
+      const existingSessionId = this.sessionsByThread.get(options.threadId);
+      if (existingSessionId) {
+        args.push("--resume", existingSessionId);
+      }
     }
 
     return args;
@@ -65,6 +79,12 @@ export class ClaudeCodeBackend extends CliAgentBackend {
 
     // Extract the text result
     const result = typeof parsed["result"] === "string" ? parsed["result"] : stdout;
+
+    // Capture session ID for thread continuity (--resume on subsequent nodes)
+    const sessionId = typeof parsed["session_id"] === "string" ? parsed["session_id"] : undefined;
+    if (sessionId && options?.threadId) {
+      this.sessionsByThread.set(options.threadId, sessionId);
+    }
 
     // Extract usage data and write to disk
     const usage = parsed["usage"] as ClaudeUsage | undefined;
